@@ -1,0 +1,76 @@
+services:
+  mongo:
+    image: mongo:8.0
+    environment:
+      MONGO_INITDB_DATABASE: assistant
+      # Compatibilidad de TCMalloc/rseq con kernels Linux 6.19 o posteriores.
+      GLIBC_TUNABLES: glibc.pthread.rseq=1
+    ports:
+      - "27017:27017"
+    volumes:
+      - assistant_mongo_data:/data/db
+      - ./backend/assistant/docker/mongo-init.js:/docker-entrypoint-initdb.d/001-assistant.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped
+
+  chatbot:
+    build:
+      context: ./backend/assistant
+      target: runtime
+    environment:
+      CHATBOT_PROVIDER: ${CHATBOT_PROVIDER:-stub}
+      API_GPT: ${API_GPT:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      CHATBOT_PROMPT_FILE: prompts/system.md
+      CHATBOT_PROMPT_VERSION: ${CHATBOT_PROMPT_VERSION:-assistant-v1}
+      CHATBOT_ALLOWED_ORIGINS: ${CHATBOT_ALLOWED_ORIGINS:-http://localhost:3000}
+      MONGODB_URI: mongodb://mongo:27017/assistant
+      MONGODB_DATABASE: assistant
+      MONGODB_REQUIRED: "true"
+      MONGODB_CONTEXT_MODE: projection
+      MONGODB_CONTEXT_COLLECTION: assistant_contexts
+      MONGODB_USER_ID_TYPE: string
+    ports:
+      - "8010:8010"
+    volumes:
+      - ./backend/assistant/prompts:/app/assistant/prompts:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  tests:
+    profiles: ["test"]
+    build:
+      context: ./backend/assistant
+      target: test
+    command: ["python", "-m", "pytest", "-q", "assistant/tests"]
+    environment:
+      CHATBOT_PROVIDER: stub
+      API_GPT: ""
+      CHATBOT_PROMPT_FILE: prompts/system.md
+      MONGODB_URI: ""
+      ASSISTANT_BASE_URL: http://chatbot:8010
+    depends_on:
+      chatbot:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  assistant_mongo_data:
