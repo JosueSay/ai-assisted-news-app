@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Control de Asistencia",
+    "slug": "control-asistencia",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "light",
+    "scheme": "controlasistencia",
+    "icon": "./assets/icon.png",
+    "android": {
+      "package": "com.fuentedelexito.controlasistencia",
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#12372A"
+      },
+      "permissions": [
+        "USE_BIOMETRIC",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ]
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.fuentedelexito.controlasistencia"
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/icon.png"
+    },
+    "plugins": [
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Permite que Control de Asistencia use Face ID para confirmar tu marcaje."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Permite que Control de Asistencia use la cámara para la foto de marcaje."
+        }
+      ]
+    ]
+  }
+}
