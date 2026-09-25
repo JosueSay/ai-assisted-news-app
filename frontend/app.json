@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "AI News",
+    "slug": "ai-assisted-news-app",
+    "scheme": "ainews",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.aina.news"
+    },
+    "android": {
+      "package": "com.aina.news"
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-web-browser"
+    ]
+  }
+}
