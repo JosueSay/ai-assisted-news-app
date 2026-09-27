@@ -395,3 +395,131 @@ Detenerse y solicitar decisión humana cuando:
 - no pueda verificarse de forma segura el resultado.
 
 No resolver silenciosamente estas situaciones.
+
+## Bootstrap para nuevos desarrolladores
+
+El repositorio debe mantener un comando de Makefile que prepare los archivos locales requeridos por un nuevo desarrollador.
+
+El comando estándar será:
+
+```text
+make setup-keys
+```
+
+Debe:
+
+- crear `keys/` si no existe;
+- crear únicamente los archivos de secretos requeridos que falten;
+- crear los archivos vacíos;
+- nunca sobrescribir archivos existentes;
+- nunca escribir valores secretos;
+- indicar qué archivos debe completar manualmente el desarrollador;
+- ser idempotente: ejecutarlo varias veces no debe destruir ni reemplazar configuración existente.
+
+Ejemplo:
+
+```text
+$ make setup-keys
+
+keys/mongodb_uri       CREATED
+
+Complete the required secret files and run:
+make db-check-config
+make db-ping
+```
+
+Si en el futuro se agrega, elimina o cambia un secreto requerido por el proyecto, el mismo cambio debe actualizar:
+
+- `make setup-keys`;
+- `keys/README.md`;
+- configuración relacionada;
+- documentación correspondiente.
+
+La configuración de secretos debe mantenerse sincronizada.
+
+---
+
+## Trazabilidad del diseño de base de datos
+
+Debe existir un documento versionado que represente visualmente la estructura vigente de MongoDB.
+
+Ubicación estándar:
+
+```text
+docs/design/database/07-diagrama.md
+```
+
+Preferir Mermaid para que el diagrama permanezca como texto versionable dentro de Git.
+
+El diagrama debe representar como mínimo:
+
+- colecciones;
+- referencias entre colecciones;
+- documentos embebidos relevantes;
+- cardinalidades conceptuales cuando sean útiles.
+
+MongoDB no impone foreign keys; las relaciones mostradas representan referencias lógicas mediante ObjectId u otros identificadores.
+
+El diagrama debe reflejar el diseño implementado y no características futuras.
+
+---
+
+## Sincronización de cambios de DB
+
+Todo cambio estructural de base de datos debe mantener sincronizados:
+
+```text
+docs/design/database/
+backend/news/
+Makefile
+tests
+seeders
+scripts
+```
+
+según cuáles sean afectados.
+
+Si cambia:
+
+- una colección;
+- un campo;
+- una referencia;
+- un enum;
+- un índice;
+- una validación;
+- un catálogo;
+- una política TTL;
+- una estrategia de seed;
+- una credencial requerida;
+
+el agente debe revisar si corresponde actualizar:
+
+1. modelos Python;
+2. validaciones MongoDB;
+3. índices;
+4. seeders;
+5. tests;
+6. Makefile;
+7. README;
+8. `docs/design/database/`;
+9. `docs/design/database/07-diagrama.md`;
+10. `keys/README.md`.
+
+No considerar completa una modificación de DB cuando implementación y documentación queden desincronizadas.
+
+---
+
+## Regla de trazabilidad para loops
+
+Antes de cerrar un loop relacionado con DB, verificar explícitamente:
+
+```text
+[ ] modelos sincronizados
+[ ] documentación sincronizada
+[ ] diagrama sincronizado
+[ ] tests sincronizados
+[ ] Makefile sincronizado si corresponde
+[ ] secrets/bootstrap sincronizados si corresponde
+```
+
+El handoff debe indicar cuáles elementos fueron revisados y cuáles cambiaron.
