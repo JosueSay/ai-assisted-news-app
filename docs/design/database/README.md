@@ -14,6 +14,7 @@ Bloque de documentos que define el contenido de la base de datos y las reglas qu
 | [04 Criterios de chat y costos](04-criterios-de-chat-y-costos.md) | Sesiones temporales, nivel de confianza, consumo de IA y auditoría |
 | [05 Tiempo de lectura](05-tiempo-de-lectura.md) | Campos de duración estimada y datos derivables |
 | [06 Decisiones descartadas](06-decisiones-descartadas.md) | Campos y colecciones que se quitaron, con su motivo |
+| [07 Diagrama](07-diagrama.md) | Colecciones, documentos embebidos y referencias lógicas |
 
 ## Cómo leer los criterios
 
@@ -33,5 +34,5 @@ Valores que los criterios dejan abiertos. Se fijan aquí y se citan desde el doc
 | --- | --- | --- | --- |
 | Velocidad de lectura de referencia | 200 palabras por minuto | [Tiempo de lectura](05-tiempo-de-lectura.md) | Obliga a recalcular `estimatedReadingMinutes` en toda la colección |
 | Umbral de lectura para `read` | 90 % del contenido | [Criterios de personalización](03-criterios-de-personalizacion.md) | Cambia el significado de las interacciones ya registradas |
-| Vigencia de una sesión de chat | Por definir | [Criterios de chat y costos](04-criterios-de-chat-y-costos.md) | Determina `chatSessions.expiresAt` |
+| Vigencia de una sesión de chat | 3600 segundos | [Criterios de chat y costos](04-criterios-de-chat-y-costos.md) | Determina `chatSessions.expiresAt` |
 | Presupuesto total de IA | 20 USD | [Criterios de chat y costos](04-criterios-de-chat-y-costos.md) | Es el límite contra el que se contrasta la suma de `estimatedCostUsd` |

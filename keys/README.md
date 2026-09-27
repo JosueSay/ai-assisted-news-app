@@ -5,7 +5,7 @@ ejecutar el proyecto en entorno local.
 
 ## Reglas
 
-- **Nunca versionar** estos archivos. El directorio está en `.gitignore`.
+- **Nunca versionar** estos archivos. `.gitignore` ignora todo el directorio excepto este README.
 - Cada archivo contiene **únicamente el valor del secreto**, sin metadatos, comentarios ni
   líneas adicionales.
 - El proyecto no lee secretos de variables de entorno directamente: los lee desde estos archivos.
@@ -15,6 +15,16 @@ ejecutar el proyecto en entorno local.
 | Archivo | Propósito | ¿Debe crearlo el desarrollador? |
 | --- | --- | --- |
 | `mongodb_uri` | URI de conexión a MongoDB Atlas para la aplicación de noticias. | Sí |
+| `client_id` | Identificador de cliente para autenticación futura (reservado). | Sí (vacío) |
+| `client_secret` | Secreto de cliente para autenticación futura (reservado). | Sí (vacío) |
+
+## Preparación automática
+
+```bash
+make setup-keys
+```
+
+Crea los archivos faltantes vacíos. No sobrescribe archivos existentes.
 
 ## Formato esperado
 
@@ -25,6 +35,11 @@ Contiene únicamente la URI de MongoDB Atlas. Sin comillas, sin saltos de línea
 ```
 mongodb+srv://usuario:contraseña@cluster.xxxxx.mongodb.net/
 ```
+
+### `client_id` y `client_secret`
+
+Reservados para autenticación futura. Deben estar presentes aunque vacíos. No son leídos,
+validados ni utilizados por la infraestructura de MongoDB actual.
 
 ## Cómo crear `mongodb_uri`
 

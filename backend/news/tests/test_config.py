@@ -35,5 +35,6 @@ class TestGetNewsSettings:
         assert settings.mongodb_database == "custom_news_db"
 
     def test_mongodb_configured_property(self) -> None:
+        os.environ["NEWS_MONGODB_URI_FILE"] = "/tmp/nonexistent_uri_for_test"
         settings = get_news_settings()
         assert settings.mongodb_configured is False

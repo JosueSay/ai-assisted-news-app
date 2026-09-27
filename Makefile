@@ -1,4 +1,4 @@
-.PHONY: db-check-config db-ping db-test
+.PHONY: db-check-config db-ping db-test setup-keys
 
 NEWS_ROOT := backend/news
 
@@ -13,3 +13,20 @@ db-ping:
 db-test:
 	@echo "=== Running news DB tests ==="
 	@python3 -m pytest $(NEWS_ROOT)/tests -v
+
+setup-keys:
+	@echo "=== Setting up secret files ==="
+	@mkdir -p keys
+	@for f in mongodb_uri client_id client_secret; do \
+		if [ -e "keys/$$f" ] || [ -L "keys/$$f" ]; then \
+			echo "keys/$$f       EXISTS"; \
+		else \
+			touch "keys/$$f"; \
+			echo "keys/$$f       CREATED"; \
+		fi \
+	done
+	@echo ""
+	@echo "Complete missing secret values manually."
+	@echo "Then run:"
+	@echo "make db-check-config"
+	@echo "make db-ping"

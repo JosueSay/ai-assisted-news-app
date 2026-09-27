@@ -6,6 +6,8 @@ from pathlib import Path
 from news.check_config import run_check
 from news.config import get_news_settings
 
+MISSING_URI = "/tmp/nonexistent_mongodb_uri_for_test"
+
 
 class TestRunCheck:
     def test_run_check_reports_configured(self, tmp_path: Path) -> None:
@@ -17,6 +19,7 @@ class TestRunCheck:
         assert "missing" not in output
 
     def test_run_check_reports_missing(self) -> None:
+        os.environ["NEWS_MONGODB_URI_FILE"] = MISSING_URI
         output = run_check()
         assert "missing" in output
         assert "configured" not in output
