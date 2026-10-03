@@ -21,7 +21,7 @@ flowchart LR
 
     subgraph Backend["Red interna del backend"]
         API["API principal<br/>FastAPI :8000"]
-        INGEST["Job de ingesta<br/>mismo código que la API"]
+        INGEST["Ingesta / scraper<br/>servicio aparte"]
         ASSIST["Asistente<br/>FastAPI :8010"]
     end
 
@@ -45,7 +45,7 @@ flowchart LR
 | API a Google | La firma, `aud`, `iss`, `exp` y `email_verified` del `id_token` se validan en el servidor. |
 | API a asistente | Red privada. El puerto 8010 no se publica fuera de Docker. |
 | API a MongoDB | Usuario de base de datos con `readWrite` solo sobre `news_app`. TLS obligatorio. IP en lista de acceso. |
-| Ingesta a fuentes | Solo URLs de una lista fija de fuentes. Tiempo máximo y tamaño máximo por respuesta. |
+| Ingesta a fuentes | Solo URLs de una lista fija de fuentes. Tiempo máximo y tamaño máximo por respuesta. Detalle en [ingesta.md](ingesta.md). |
 
 ## Inicio de sesión y renovación
 
@@ -123,6 +123,7 @@ erDiagram
         string summary
         string source
         string topic
+        string image_url
         date published_at
         date ingested_at
     }

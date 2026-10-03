@@ -18,8 +18,9 @@ clúster MongoDB Atlas de desarrollo (`news-app-dev`).
 3. Access token JWT firmado con HS256, vida de 15 minutos, `iss` y `aud` fijos, `sub` = id del
    usuario. Refresh token opaco de 256 bits, vida de 30 días, guardado como hash SHA-256, con
    rotación en cada uso y revocación de la familia si se reutiliza.
-4. La ingesta de noticias corre como job separado con el mismo código. El tráfico de usuarios nunca
-   provoca peticiones a fuentes externas.
+4. La ingesta de noticias es un servicio aparte (`backend/services/ingest`): RSS primero y scraper
+   HTML solo como respaldo. Comparte con la API el formato de `articles`. El tráfico de usuarios
+   nunca provoca peticiones a fuentes externas. Detalle en `docs/architecture/ingesta.md`.
 5. MongoDB Atlas en desarrollo. El Docker Compose sigue usando Mongo local para pruebas.
 
 ## Controles (OWASP API Security Top 10, 2023)
@@ -41,8 +42,9 @@ Controles adicionales:
 
 - Secretos solo en variables de entorno o gestor de secretos. `.env` ignorado por git. Nada secreto en
   variables `EXPO_PUBLIC_*`.
-- Usuario de MongoDB con rol `readWrite` solo sobre `news_app`. El asistente con un usuario
-  `read` aparte.
+- Un usuario de MongoDB por servicio en el clúster compartido: la API con `readWrite` sobre
+  `news_app`, el scraper con escritura solo en `articles` e `ingestion_runs`, el asistente solo
+  lectura. Cada integrante del equipo usa su propio usuario.
 - Lista de IPs en Atlas. No usar `0.0.0.0/0`.
 - Logs estructurados con `request_id`, sin tokens, contraseñas ni cuerpos completos.
 - En el teléfono, tokens en `expo-secure-store`, no en AsyncStorage.
