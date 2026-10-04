@@ -1,0 +1,1 @@
+"""Tests para la infraestructura de base de datos de noticias."""
