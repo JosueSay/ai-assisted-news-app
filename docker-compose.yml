@@ -55,6 +55,39 @@ services:
       retries: 20
     restart: unless-stopped
 
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    env_file:
+      - path: ./frontend/.env
+        required: false
+    environment:
+      EXPO_NO_TELEMETRY: "1"
+      EXPO_HOST: ${EXPO_HOST:-lan}
+      EXPO_PORT: ${EXPO_PORT:-8081}
+      REACT_NATIVE_PACKAGER_HOSTNAME: ${REACT_NATIVE_PACKAGER_HOSTNAME:-}
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+    ports:
+      - "${EXPO_PORT:-8081}:${EXPO_PORT:-8081}"
+      - "19000:19000"
+      - "19001:19001"
+      - "19002:19002"
+      - "19006:19006"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    command:
+      [
+        "sh",
+        "-c",
+        "npm start -- --host \"$${EXPO_HOST}\" --port \"$${EXPO_PORT}\"",
+      ]
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
   tests:
     profiles: ["test"]
     build:
@@ -74,3 +107,4 @@ services:
 
 volumes:
   assistant_mongo_data:
+  frontend_node_modules:

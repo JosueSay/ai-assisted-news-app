@@ -23,6 +23,31 @@ Esto abre el Metro Bundler con un código QR en la terminal:
 
 También podés previsualizar en el navegador con `npm run web`.
 
+## Ejecutar con Docker Compose
+
+Desde la raiz del proyecto:
+
+```bash
+docker compose up --build frontend
+```
+
+Compose construye el contenedor del frontend, instala dependencias con `npm ci`
+y publica Metro en `http://localhost:8081`. El host de Expo es configurable:
+
+```bash
+EXPO_HOST=tunnel docker compose up --build frontend
+```
+
+En modo `lan`, si el QR muestra una IP tipo `172.x.x.x`, Expo esta anunciando la
+red interna de Docker. Puedes forzar la IP local real de tu computadora:
+
+```bash
+REACT_NATIVE_PACKAGER_HOSTNAME=192.168.1.50 docker compose up --build frontend
+```
+
+Si configuras Google Sign-In real, crea `frontend/.env` desde `.env.example`;
+Compose lo carga automaticamente cuando existe.
+
 ## Qué vas a ver
 
 Al abrir la app aparece la pantalla de login con dos botones:
