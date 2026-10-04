@@ -1,47 +1,90 @@
-import { Pressable, StyleSheet, Text } from "react-native";
+import type { ReactNode } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { colors, radii, spacing } from "../theme";
+import { colors, fonts, radii, spacing } from "../theme";
 
 type Props = {
   label: string;
   onPress: () => void;
   disabled?: boolean;
-  variant?: "primary" | "secondary";
+  variant?: "primary" | "secondary" | "ghost";
+  icon?: ReactNode;
 };
 
-export function AppButton({ label, onPress, disabled, variant = "primary" }: Props) {
-  const isPrimary = variant === "primary";
+export function AppButton({
+  label,
+  onPress,
+  disabled,
+  variant = "primary",
+  icon,
+}: Props) {
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled) }}
       onPress={onPress}
       disabled={disabled}
       style={({ pressed }) => [
         styles.base,
-        isPrimary ? styles.primary : styles.secondary,
+        styles[variant],
         disabled ? styles.disabled : null,
         pressed && !disabled ? styles.pressed : null,
       ]}
     >
-      <Text style={isPrimary ? styles.primaryLabel : styles.secondaryLabel}>{label}</Text>
+      <View style={styles.content}>
+        {icon}
+        <Text style={[styles.label, styles[`${variant}Label`]]}>{label}</Text>
+      </View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   base: {
-    paddingVertical: spacing.sm + 4,
+    minHeight: 48,
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    borderRadius: radii.md,
+    borderRadius: radii.control,
     alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
   },
-  primary: { backgroundColor: colors.primary },
+  content: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+  },
+  primary: {
+    backgroundColor: colors.action,
+    borderColor: colors.action,
+  },
   secondary: {
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.controlBorder,
   },
-  disabled: { opacity: 0.5 },
-  pressed: { opacity: 0.85 },
-  primaryLabel: { color: colors.onPrimary, fontWeight: "600", fontSize: 16 },
-  secondaryLabel: { color: colors.text, fontWeight: "600", fontSize: 16 },
+  ghost: {
+    backgroundColor: "transparent",
+    borderColor: "transparent",
+  },
+  disabled: {
+    opacity: 0.52,
+  },
+  pressed: {
+    opacity: 0.82,
+  },
+  label: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  primaryLabel: {
+    color: colors.onSolid,
+  },
+  secondaryLabel: {
+    color: colors.ink,
+  },
+  ghostLabel: {
+    color: colors.action,
+  },
 });

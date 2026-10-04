@@ -1,4 +1,14 @@
 import { StatusBar } from "expo-status-bar";
+import { useFonts } from "expo-font";
+import {
+  Newsreader_600SemiBold,
+  Newsreader_700Bold,
+} from "@expo-google-fonts/newsreader";
+import {
+  Roboto_400Regular,
+  Roboto_500Medium,
+  Roboto_700Bold,
+} from "@expo-google-fonts/roboto";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 
 import { LoginScreen } from "./features/auth/LoginScreen";
@@ -7,6 +17,14 @@ import { useGoogleAuth } from "./services/googleAuth";
 import { colors } from "./theme";
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    Newsreader_600SemiBold,
+    Newsreader_700Bold,
+    Roboto_400Regular,
+    Roboto_500Medium,
+    Roboto_700Bold,
+  });
+
   const {
     user,
     isLoading,
@@ -18,18 +36,18 @@ export default function App() {
     signOut,
   } = useGoogleAuth();
 
-  if (isLoading && !user) {
+  if (!fontsLoaded || (isLoading && !user)) {
     return (
       <View style={styles.splash}>
-        <StatusBar style="light" />
-        <ActivityIndicator color={colors.primary} />
+        <StatusBar style="dark" />
+        <ActivityIndicator color={colors.action} />
       </View>
     );
   }
 
   return (
     <>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
       {user ? (
         <NewsFeedScreen user={user} onSignOut={() => void signOut()} />
       ) : (

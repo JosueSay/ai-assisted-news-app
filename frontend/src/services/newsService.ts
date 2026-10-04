@@ -1,37 +1,65 @@
-import type { NewsArticle } from "../types";
+import {
+  DEMO_ARTICLES,
+  FEATURED_ARTICLE_ID,
+  SECONDARY_ARTICLE_IDS,
+} from "../data/demoArticles";
+import type { CategoryId, NewsArticle } from "../types";
 
-const DEMO_ARTICLES: NewsArticle[] = [
-  {
-    id: "1",
-    title: "Guatemala impulsa programas de ahorro digital para jóvenes",
-    summary:
-      "Nuevas iniciativas buscan acercar la educación financiera a estudiantes universitarios mediante apps móviles.",
-    source: "Prensa Libre",
-    publishedAt: "2026-09-20T09:00:00-06:00",
-  },
-  {
-    id: "2",
-    title: "Bancos regionales adoptan asistentes conversacionales con IA",
-    summary:
-      "La banca centroamericana explora chatbots para resolver consultas frecuentes y mejorar la atención al cliente.",
-    source: "El Economista",
-    publishedAt: "2026-09-19T14:30:00-06:00",
-  },
-  {
-    id: "3",
-    title: "Crece la adopción de billeteras digitales en Centroamérica",
-    summary:
-      "Un reporte reciente muestra un aumento sostenido en el uso de pagos móviles entre pequeños comercios.",
-    source: "Forbes Centroamérica",
-    publishedAt: "2026-09-18T11:15:00-06:00",
-  },
-];
+function normalizeText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
 
-/**
- * Fuente de datos del feed. Hoy devuelve datos de demostración; el contrato
- * (async, mismo shape de NewsArticle) ya queda listo para apuntar a un
- * servicio real en backend/services cuando exista.
- */
 export async function fetchNewsFeed(): Promise<NewsArticle[]> {
-  return DEMO_ARTICLES;
+  return [...DEMO_ARTICLES].sort(
+    (first, second) =>
+      new Date(second.publishedAt).getTime() - new Date(first.publishedAt).getTime(),
+  );
+}
+
+export function getArticleBySlug(slug: string, articles = DEMO_ARTICLES) {
+  return articles.find((article) => article.slug === slug) ?? null;
+}
+
+export function getFeaturedArticles(articles = DEMO_ARTICLES) {
+  return {
+    lead: articles.find((article) => article.id === FEATURED_ARTICLE_ID) ?? articles[0],
+    secondary: SECONDARY_ARTICLE_IDS.map((id) =>
+      articles.find((article) => article.id === id),
+    ).filter((article): article is NewsArticle => Boolean(article)),
+  };
+}
+
+export function getLatestArticles(articles = DEMO_ARTICLES, limit = 6) {
+  return [...articles]
+    .sort(
+      (first, second) =>
+        new Date(second.publishedAt).getTime() - new Date(first.publishedAt).getTime(),
+    )
+    .slice(0, limit);
+}
+
+export function getArticlesByCategory(category: CategoryId, articles = DEMO_ARTICLES) {
+  return articles.filter((article) => article.category === category);
+}
+
+export function searchArticles(query: string, articles = DEMO_ARTICLES) {
+  const normalizedQuery = normalizeText(query);
+  if (!normalizedQuery) return [];
+
+  return articles.filter((article) => {
+    const searchable = normalizeText(
+      `${article.title} ${article.summary} ${article.category} ${article.author}`,
+    );
+    return searchable.includes(normalizedQuery);
+  });
+}
+
+export function getRelatedArticles(article: NewsArticle, articles = DEMO_ARTICLES) {
+  return articles
+    .filter((candidate) => candidate.category === article.category && candidate.id !== article.id)
+    .slice(0, 3);
 }

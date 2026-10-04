@@ -12,15 +12,20 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@expo-google-fonts/newsreader": "^0.4.1",
+    "@expo-google-fonts/roboto": "^0.4.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.25",
     "expo-auth-session": "~57.0.13",
     "expo-crypto": "~57.0.3",
+    "expo-font": "^57.0.4",
     "expo-status-bar": "~57.0.1",
     "expo-web-browser": "~57.0.3",
+    "lucide-react-native": "^1.52.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
+    "react-native-svg": "^15.15.5",
     "react-native-web": "~0.21.0"
   },
   "devDependencies": {

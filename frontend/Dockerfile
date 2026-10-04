@@ -10,6 +10,9 @@ RUN npm ci
 
 COPY . .
 
+RUN chown -R node:node /app
+USER node
+
 EXPOSE 8081 19000 19001 19002 19006
 
 CMD ["npm", "start", "--", "--host", "lan", "--port", "8081"]
