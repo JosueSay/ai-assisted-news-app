@@ -1,6 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   SafeAreaView,
@@ -8,6 +10,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  type KeyboardTypeOptions,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -15,25 +18,35 @@ import {
   ArrowLeft,
   Bookmark,
   BookmarkCheck,
-  Grid3X3,
+  FilePlus,
   Home,
   LogOut,
   Search,
+  X,
 } from "lucide-react-native";
 
 import { ArticleCard } from "../../components/ArticleCard";
 import { ArticleImage } from "../../components/ArticleImage";
 import { AppButton } from "../../components/AppButton";
-import { CATEGORIES, type AppUser, type CategoryId, type NewsArticle } from "../../types";
-import { getCategoryLabel } from "../../data/demoArticles";
 import {
-  fetchNewsFeed,
+  CATEGORIES,
+  getCategoryLabel,
+  type AppUser,
+  type CategoryId,
+  type NewsArticle,
+} from "../../types";
+import {
+  createAdminNews,
+  fetchNewsFeedWithStatus,
+  fetchLocations,
   getArticleBySlug,
   getArticlesByCategory,
   getFeaturedArticles,
   getLatestArticles,
   getRelatedArticles,
   searchArticles,
+  type AdminNewsCreateInput,
+  type NewsLocation,
 } from "../../services/newsService";
 import { colors, fonts, layout, radii, shadows, spacing } from "../../theme";
 
@@ -44,13 +57,32 @@ type Props = {
 
 type NewsRoute =
   | { name: "home" }
-  | { name: "sections" }
-  | { name: "search"; query: string }
   | { name: "saved" }
+  | { name: "adminCreate" }
   | { name: "category"; category: CategoryId }
   | { name: "article"; slug: string };
 
 const SAVED_STORAGE_KEY = "ai-news:saved-articles";
+const DEFAULT_ADMIN_FORM = {
+  title: "",
+  slug: "",
+  summary: "",
+  content: "",
+  topic: "actualidad" as CategoryId,
+  keywords: "",
+  locationId: "",
+  status: "published" as AdminNewsCreateInput["status"],
+  verificationStatus: "confirmed" as AdminNewsCreateInput["verificationStatus"],
+  sourceType: "other" as NonNullable<AdminNewsCreateInput["sourceType"]>,
+  sourceName: "",
+  sourceUrl: "",
+  imageUrl: "",
+  imageAlt: "",
+  imageCredit: "",
+  imageRights: "",
+};
+
+type AdminFormState = typeof DEFAULT_ADMIN_FORM;
 
 function isCategoryId(value: string): value is CategoryId {
   return CATEGORIES.some((category) => category.id === value);
@@ -60,14 +92,10 @@ function serializeRoute(route: NewsRoute) {
   switch (route.name) {
     case "home":
       return "#/inicio";
-    case "sections":
-      return "#/secciones";
-    case "search":
-      return route.query
-        ? `#/buscar?q=${encodeURIComponent(route.query)}`
-        : "#/buscar";
     case "saved":
       return "#/guardados";
+    case "adminCreate":
+      return "#/admin/nueva";
     case "category":
       return `#/seccion/${route.category}`;
     case "article":
@@ -78,14 +106,10 @@ function serializeRoute(route: NewsRoute) {
 function parseRouteFromHash(hash: string): NewsRoute {
   const cleanHash = hash.replace(/^#\/?/, "");
   if (!cleanHash || cleanHash === "inicio") return { name: "home" };
-  if (cleanHash === "secciones") return { name: "sections" };
+  if (cleanHash === "secciones") return { name: "home" };
   if (cleanHash === "guardados") return { name: "saved" };
-  if (cleanHash.startsWith("buscar")) {
-    const query = cleanHash.includes("?")
-      ? new URLSearchParams(cleanHash.split("?")[1]).get("q") ?? ""
-      : "";
-    return { name: "search", query };
-  }
+  if (cleanHash === "admin" || cleanHash === "admin/nueva") return { name: "adminCreate" };
+  if (cleanHash.startsWith("buscar")) return { name: "home" };
   if (cleanHash.startsWith("seccion/")) {
     const category = cleanHash.replace("seccion/", "");
     return isCategoryId(category) ? { name: "category", category } : { name: "home" };
@@ -115,9 +139,8 @@ function formatLongDate(value: string) {
 function routeTitle(route: NewsRoute, article: NewsArticle | null) {
   if (route.name === "article" && article) return article.title;
   if (route.name === "category") return getCategoryLabel(route.category);
-  if (route.name === "sections") return "Secciones";
-  if (route.name === "search") return "Buscar";
   if (route.name === "saved") return "Guardados";
+  if (route.name === "adminCreate") return "Nueva noticia";
   return "Inicio";
 }
 
@@ -126,15 +149,43 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
   const isMobile = width < 768;
   const isTablet = width >= 768 && width < 1024;
   const isDesktop = width >= 1024;
-  const searchInputRef = useRef<TextInput>(null);
 
   const [articles, setArticles] = useState<NewsArticle[]>([]);
+  const [isFeedLoading, setIsFeedLoading] = useState(true);
+  const [feedError, setFeedError] = useState<string | null>(null);
   const [route, setRoute] = useState<NewsRoute>(getInitialRoute);
+  const [searchQuery, setSearchQuery] = useState("");
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [storageError, setStorageError] = useState<string | null>(null);
+  const [adminForm, setAdminForm] = useState<AdminFormState>(DEFAULT_ADMIN_FORM);
+  const [locations, setLocations] = useState<NewsLocation[]>([]);
+  const [isLocationsLoading, setIsLocationsLoading] = useState(false);
+  const [locationsError, setLocationsError] = useState<string | null>(null);
+  const [isSubmittingAdminNews, setIsSubmittingAdminNews] = useState(false);
+  const [adminFormError, setAdminFormError] = useState<string | null>(null);
+  const [adminSuccess, setAdminSuccess] = useState<string | null>(null);
+
+  const isAdmin = user.role === "admin" && Boolean(user.adminToken);
 
   useEffect(() => {
-    void fetchNewsFeed().then(setArticles);
+    let active = true;
+    setIsFeedLoading(true);
+    void fetchNewsFeedWithStatus()
+      .then((result) => {
+        if (!active) return;
+        setArticles(result.articles);
+        setFeedError(result.error);
+      })
+      .catch(() => {
+        if (!active) return;
+        setFeedError("No pudimos cargar las noticias.");
+      })
+      .finally(() => {
+        if (active) setIsFeedLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -144,6 +195,31 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
       })
       .catch(() => setStorageError("No pudimos restaurar tus guardados locales."));
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let active = true;
+    setIsLocationsLoading(true);
+    setLocationsError(null);
+    void fetchLocations()
+      .then((items) => {
+        if (!active) return;
+        setLocations(items);
+        setAdminForm((current) => ({
+          ...current,
+          locationId: current.locationId || items[0]?.id || "",
+        }));
+      })
+      .catch(() => {
+        if (active) setLocationsError("No pudimos cargar el catálogo de ubicaciones.");
+      })
+      .finally(() => {
+        if (active) setIsLocationsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isAdmin]);
 
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined") return;
@@ -162,14 +238,6 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
       document.title = `${routeTitle(route, currentArticle)} | AI News`;
     }
   }, [currentArticle, route]);
-
-  useEffect(() => {
-    if (route.name === "search") {
-      const timeout = setTimeout(() => searchInputRef.current?.focus(), 120);
-      return () => clearTimeout(timeout);
-    }
-    return undefined;
-  }, [route.name]);
 
   const navigate = useCallback((nextRoute: NewsRoute, replace = false) => {
     setRoute(nextRoute);
@@ -210,8 +278,98 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
     [savedIds],
   );
 
+  function updateAdminField<K extends keyof AdminFormState>(
+    field: K,
+    value: AdminFormState[K],
+  ) {
+    setAdminForm((current) => ({ ...current, [field]: value }));
+    setAdminFormError(null);
+    setAdminSuccess(null);
+  }
+
+  function buildAdminInput(): AdminNewsCreateInput | null {
+    const title = adminForm.title.trim();
+    const summary = adminForm.summary.trim();
+    const content = adminForm.content.trim();
+    const locationId = adminForm.locationId.trim();
+    const sourceName = adminForm.sourceName.trim();
+    const sourceUrl = adminForm.sourceUrl.trim();
+
+    if (!title || !summary || !content || !locationId) {
+      setAdminFormError("Completa título, resumen, contenido y ubicación.");
+      return null;
+    }
+    if (Boolean(sourceName) !== Boolean(sourceUrl)) {
+      setAdminFormError("La fuente necesita nombre y URL juntos.");
+      return null;
+    }
+
+    return {
+      title,
+      slug: adminForm.slug.trim(),
+      summary,
+      content,
+      topic: adminForm.topic,
+      keywords: adminForm.keywords
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+      locationId,
+      status: adminForm.status,
+      verificationStatus: adminForm.verificationStatus,
+      sourceName: sourceName || undefined,
+      sourceUrl: sourceUrl || undefined,
+      sourceType: adminForm.sourceType,
+      imageUrl: adminForm.imageUrl.trim() || undefined,
+      imageAlt: adminForm.imageAlt.trim() || undefined,
+      imageCredit: adminForm.imageCredit.trim() || undefined,
+      imageRights: adminForm.imageRights.trim() || undefined,
+    };
+  }
+
+  const submitAdminNews = useCallback(async () => {
+    if (!user.adminToken) {
+      setAdminFormError("Inicia sesión como admin para crear noticias.");
+      return;
+    }
+    const input = buildAdminInput();
+    if (!input) return;
+
+    setIsSubmittingAdminNews(true);
+    setAdminFormError(null);
+    setAdminSuccess(null);
+    try {
+      const created = await createAdminNews(user.adminToken, input);
+      if (input.status === "published") {
+        setArticles((current) => [
+          created,
+          ...current.filter((article) => article.id !== created.id),
+        ]);
+      }
+      setAdminSuccess(
+        input.status === "published"
+          ? "Noticia publicada y agregada al feed local."
+          : "Borrador guardado en MongoDB.",
+      );
+      setAdminForm({
+        ...DEFAULT_ADMIN_FORM,
+        locationId: input.locationId,
+        topic: input.topic,
+      });
+    } catch (error) {
+      setAdminFormError(
+        error instanceof Error ? error.message : "No pudimos crear la noticia.",
+      );
+    } finally {
+      setIsSubmittingAdminNews(false);
+    }
+  }, [adminForm, user.adminToken]);
+
   const renderNotice = () => (
-    <Text style={styles.notice}>Edición de demostración · Noticias ficticias</Text>
+    <>
+      <Text style={styles.notice}>Feed conectado a MongoDB</Text>
+      {feedError ? <Text style={styles.warningText}>{feedError}</Text> : null}
+    </>
   );
 
   const renderSectionTitle = (title: string, kicker?: string) => (
@@ -246,6 +404,32 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
     </View>
   );
 
+  const renderInlineSearch = () => (
+    <View style={styles.searchBox}>
+      <Search size={20} color={colors.textSecondary} />
+      <TextInput
+        accessibilityLabel="Buscar noticias"
+        placeholder="Buscar por tema, categoría o titular"
+        placeholderTextColor={colors.textSecondary}
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        style={styles.searchInput}
+        returnKeyType="search"
+      />
+      {searchQuery.trim() ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Limpiar búsqueda"
+          hitSlop={8}
+          onPress={() => setSearchQuery("")}
+          style={({ pressed }) => [styles.clearSearchButton, pressed ? styles.pressed : null]}
+        >
+          <X size={18} color={colors.textSecondary} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+
   const renderArticleGrid = (items: NewsArticle[]) => (
     <View style={styles.articleGrid}>
       {items.map((article) => (
@@ -268,104 +452,420 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
     </View>
   );
 
+  function updateAdminTextField(field: keyof AdminFormState, value: string) {
+    setAdminForm((current) => ({ ...current, [field]: value }));
+    setAdminFormError(null);
+    setAdminSuccess(null);
+  }
+
+  const renderAdminTextField = ({
+    label,
+    field,
+    placeholder,
+    multiline = false,
+    keyboardType = "default",
+  }: {
+    label: string;
+    field: keyof AdminFormState;
+    placeholder: string;
+    multiline?: boolean;
+    keyboardType?: KeyboardTypeOptions;
+  }) => (
+    <View style={styles.fieldGroup}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        accessibilityLabel={label}
+        autoCapitalize="sentences"
+        autoCorrect
+        editable={!isSubmittingAdminNews}
+        keyboardType={keyboardType}
+        multiline={multiline}
+        onChangeText={(value) => updateAdminTextField(field, value)}
+        placeholder={placeholder}
+        placeholderTextColor={colors.textSecondary}
+        style={[styles.formInput, multiline ? styles.formTextArea : null]}
+        textAlignVertical={multiline ? "top" : "center"}
+        value={String(adminForm[field])}
+      />
+    </View>
+  );
+
+  const renderAdminOption = (
+    label: string,
+    active: boolean,
+    onPress: () => void,
+    optionKey?: string,
+  ) => (
+    <Pressable
+      key={optionKey}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.formChip,
+        active ? styles.formChipActive : null,
+        pressed ? styles.pressed : null,
+      ]}
+    >
+      <Text style={[styles.formChipLabel, active ? styles.formChipLabelActive : null]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+
+  const renderAdminCreate = () => {
+    if (!isAdmin) {
+      return (
+        <>
+          {renderNotice()}
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Acceso admin requerido</Text>
+            <Text style={styles.emptyText}>
+              Inicia sesión con una cuenta admin para crear noticias en MongoDB.
+            </Text>
+            <AppButton label="Volver al inicio" onPress={() => navigate({ name: "home" })} />
+          </View>
+        </>
+      );
+    }
+
+    const selectedLocation = locations.find((location) => location.id === adminForm.locationId);
+
+    return (
+      <>
+        {renderNotice()}
+        <AppButton
+          label="Volver al inicio"
+          variant="ghost"
+          onPress={() => navigate({ name: "home" })}
+          icon={<ArrowLeft size={18} color={colors.action} />}
+        />
+
+        <View style={styles.adminShell}>
+          <View style={styles.adminIntro}>
+            <Text style={styles.kicker}>Panel admin</Text>
+            <Text style={styles.adminTitle}>Nueva noticia</Text>
+            <Text style={styles.adminCopy}>
+              Crea una pieza manual con ubicación simulada, verificación y fuente.
+              Los borradores quedan guardados, pero solo las publicadas aparecen en el feed.
+            </Text>
+          </View>
+
+          <View style={styles.adminForm}>
+            {adminFormError ? <Text style={styles.errorText}>{adminFormError}</Text> : null}
+            {adminSuccess ? <Text style={styles.successText}>{adminSuccess}</Text> : null}
+
+            <View style={styles.formSection}>
+              <Text style={styles.formSectionTitle}>Contenido</Text>
+              {renderAdminTextField({
+                label: "Título",
+                field: "title",
+                placeholder: "Titular de la noticia",
+              })}
+              {renderAdminTextField({
+                label: "Slug",
+                field: "slug",
+                placeholder: "se-genera-desde-el-titulo-si-lo-dejas-vacio",
+              })}
+              {renderAdminTextField({
+                label: "Resumen",
+                field: "summary",
+                placeholder: "Una entradilla breve y clara",
+                multiline: true,
+              })}
+              {renderAdminTextField({
+                label: "Contenido",
+                field: "content",
+                placeholder: "Escribe la noticia completa. Separa párrafos con una línea vacía.",
+                multiline: true,
+              })}
+              {renderAdminTextField({
+                label: "Palabras clave",
+                field: "keywords",
+                placeholder: "local, comunidad, transporte",
+              })}
+            </View>
+
+            <View style={styles.formSection}>
+              <Text style={styles.formSectionTitle}>Clasificación</Text>
+              <Text style={styles.fieldLabel}>Categoría</Text>
+              <View style={styles.formChips}>
+                {CATEGORIES.map((category) =>
+                  renderAdminOption(
+                    category.label,
+                    adminForm.topic === category.id,
+                    () => updateAdminField("topic", category.id),
+                    category.id,
+                  ),
+                )}
+              </View>
+
+              <Text style={styles.fieldLabel}>Estado</Text>
+              <View style={styles.formChips}>
+                {renderAdminOption("Publicar ahora", adminForm.status === "published", () =>
+                  updateAdminField("status", "published"),
+                )}
+                {renderAdminOption("Guardar borrador", adminForm.status === "draft", () =>
+                  updateAdminField("status", "draft"),
+                )}
+              </View>
+
+              <Text style={styles.fieldLabel}>Verificación</Text>
+              <View style={styles.formChips}>
+                {renderAdminOption("Confirmada", adminForm.verificationStatus === "confirmed", () =>
+                  updateAdminField("verificationStatus", "confirmed"),
+                )}
+                {renderAdminOption("En desarrollo", adminForm.verificationStatus === "developing", () =>
+                  updateAdminField("verificationStatus", "developing"),
+                )}
+                {renderAdminOption(
+                  "Fuentes insuficientes",
+                  adminForm.verificationStatus === "insufficient_sources",
+                  () => updateAdminField("verificationStatus", "insufficient_sources"),
+                )}
+                {renderAdminOption(
+                  "Fuentes en conflicto",
+                  adminForm.verificationStatus === "conflicting_sources",
+                  () => updateAdminField("verificationStatus", "conflicting_sources"),
+                )}
+              </View>
+            </View>
+
+            <View style={styles.formSection}>
+              <Text style={styles.formSectionTitle}>Ubicación</Text>
+              {isLocationsLoading ? (
+                <View style={styles.inlineLoading}>
+                  <ActivityIndicator color={colors.action} />
+                  <Text style={styles.emptyText}>Cargando ubicaciones</Text>
+                </View>
+              ) : null}
+              {locationsError ? <Text style={styles.errorText}>{locationsError}</Text> : null}
+              {!isLocationsLoading && locations.length === 0 ? (
+                <Text style={styles.warningText}>
+                  Ejecuta el seeder de catálogo para crear ubicaciones antes de publicar.
+                </Text>
+              ) : null}
+              <View style={styles.formChips}>
+                {locations.map((location) =>
+                  renderAdminOption(
+                    location.name,
+                    adminForm.locationId === location.id,
+                    () => updateAdminField("locationId", location.id),
+                    location.id,
+                  ),
+                )}
+              </View>
+              {selectedLocation ? (
+                <Text style={styles.formHint}>
+                  Seleccionada: {selectedLocation.country} ({selectedLocation.countryCode})
+                </Text>
+              ) : null}
+            </View>
+
+            <View style={styles.formSection}>
+              <Text style={styles.formSectionTitle}>Fuente e imagen</Text>
+              {renderAdminTextField({
+                label: "Nombre de fuente",
+                field: "sourceName",
+                placeholder: "Medio, institución o fuente primaria",
+              })}
+              {renderAdminTextField({
+                label: "URL de fuente",
+                field: "sourceUrl",
+                placeholder: "https://example.com/noticia",
+                keyboardType: "url",
+              })}
+              <Text style={styles.fieldLabel}>Tipo de fuente</Text>
+              <View style={styles.formChips}>
+                {renderAdminOption("Oficial", adminForm.sourceType === "official", () =>
+                  updateAdminField("sourceType", "official"),
+                )}
+                {renderAdminOption("Medio", adminForm.sourceType === "media", () =>
+                  updateAdminField("sourceType", "media"),
+                )}
+                {renderAdminOption("Primaria", adminForm.sourceType === "primary_source", () =>
+                  updateAdminField("sourceType", "primary_source"),
+                )}
+                {renderAdminOption("Testigo", adminForm.sourceType === "witness", () =>
+                  updateAdminField("sourceType", "witness"),
+                )}
+                {renderAdminOption("Otra", adminForm.sourceType === "other", () =>
+                  updateAdminField("sourceType", "other"),
+                )}
+              </View>
+              {renderAdminTextField({
+                label: "URL de imagen",
+                field: "imageUrl",
+                placeholder: "https://example.com/imagen.jpg",
+                keyboardType: "url",
+              })}
+              {renderAdminTextField({
+                label: "Texto alternativo de imagen",
+                field: "imageAlt",
+                placeholder: "Describe la imagen si agregas una URL",
+              })}
+              {renderAdminTextField({
+                label: "Crédito de imagen",
+                field: "imageCredit",
+                placeholder: "Autor, medio o licencia",
+              })}
+              {renderAdminTextField({
+                label: "Derechos de imagen",
+                field: "imageRights",
+                placeholder: "Uso permitido, licencia o nota interna",
+              })}
+            </View>
+
+            <View style={styles.adminActions}>
+              <AppButton
+                label={isSubmittingAdminNews ? "Guardando..." : "Guardar noticia"}
+                onPress={() => void submitAdminNews()}
+                disabled={isSubmittingAdminNews || isLocationsLoading || locations.length === 0}
+                icon={<FilePlus size={18} color={colors.onSolid} />}
+              />
+              <AppButton
+                label="Limpiar"
+                variant="secondary"
+                onPress={() =>
+                  setAdminForm({
+                    ...DEFAULT_ADMIN_FORM,
+                    locationId: adminForm.locationId,
+                  })
+                }
+                disabled={isSubmittingAdminNews}
+              />
+            </View>
+          </View>
+        </View>
+      </>
+    );
+  };
+
   const renderHome = () => {
+    const hasSearch = searchQuery.trim().length > 0;
+    const searchResults = hasSearch ? searchArticles(searchQuery, articles) : [];
     const featured = getFeaturedArticles(articles);
     const latest = getLatestArticles(articles, 6);
     const categoryArticles = CATEGORIES.map((category) => ({
       ...category,
       articles: getArticlesByCategory(category.id, articles).slice(0, 3),
     }));
+    const hasArticles = articles.length > 0;
 
     return (
       <>
         {renderNotice()}
-        {renderCategoryChips()}
+        {renderInlineSearch()}
+        {hasSearch ? (
+          <View style={styles.searchResultsBlock}>
+            <Text style={styles.resultsTitle}>Resultados</Text>
+            {searchResults.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>No encontramos coincidencias</Text>
+                <Text style={styles.emptyText}>
+                  Revisa la escritura o prueba con una categoría distinta.
+                </Text>
+                <AppButton
+                  label="Limpiar búsqueda"
+                  variant="secondary"
+                  onPress={() => setSearchQuery("")}
+                />
+              </View>
+            ) : (
+              <>
+                <Text style={styles.resultsCount}>
+                  {searchResults.length} resultado{searchResults.length === 1 ? "" : "s"}
+                </Text>
+                {renderArticleGrid(searchResults)}
+              </>
+            )}
+          </View>
+        ) : (
+          <>
+            {hasArticles ? renderCategoryChips() : null}
 
-        <View style={[styles.hero, isDesktop ? styles.heroDesktop : null]}>
-          {featured.lead ? (
-            <View style={styles.heroLead}>
-              <ArticleCard
-                article={featured.lead}
-                isSaved={isSaved(featured.lead)}
-                onOpen={openArticle}
-                onToggleSave={toggleSave}
-                variant="lead"
-              />
+            {!hasArticles ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>No hay noticias publicadas</Text>
+                <Text style={styles.emptyText}>
+                  El feed ahora lee únicamente desde MongoDB. Crea una noticia desde el
+                  panel admin o publica documentos en la colección `news`.
+                </Text>
+                {isAdmin ? (
+                  <AppButton
+                    label="Crear noticia"
+                    onPress={() => navigate({ name: "adminCreate" })}
+                    icon={<FilePlus size={18} color={colors.onSolid} />}
+                  />
+                ) : null}
+              </View>
+            ) : null}
+
+            {hasArticles ? (
+            <View style={[styles.hero, isDesktop ? styles.heroDesktop : null]}>
+              {featured.lead ? (
+                <View style={styles.heroLead}>
+                  <ArticleCard
+                    article={featured.lead}
+                    isSaved={isSaved(featured.lead)}
+                    onOpen={openArticle}
+                    onToggleSave={toggleSave}
+                    variant="lead"
+                  />
+                </View>
+              ) : null}
+
+              <View style={[styles.heroSecondary, isTablet ? styles.heroSecondaryTablet : null]}>
+                {featured.secondary.map((article) => (
+                  <ArticleCard
+                    key={article.id}
+                    article={article}
+                    isSaved={isSaved(article)}
+                    onOpen={openArticle}
+                    onToggleSave={toggleSave}
+                    variant={isMobile ? "compact" : "secondary"}
+                  />
+                ))}
+              </View>
             </View>
-          ) : null}
+            ) : null}
 
-          <View style={[styles.heroSecondary, isTablet ? styles.heroSecondaryTablet : null]}>
-            {featured.secondary.map((article) => (
-              <ArticleCard
-                key={article.id}
-                article={article}
-                isSaved={isSaved(article)}
-                onOpen={openArticle}
-                onToggleSave={toggleSave}
-                variant={isMobile ? "compact" : "secondary"}
-              />
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          {renderSectionTitle("Últimas noticias", "Actualidad reciente")}
-          <View style={styles.latestList}>
-            {latest.map((article) => (
-              <ArticleCard
-                key={article.id}
-                article={article}
-                isSaved={isSaved(article)}
-                onOpen={openArticle}
-                onToggleSave={toggleSave}
-                variant="compact"
-              />
-            ))}
-          </View>
-        </View>
-
-        {categoryArticles.map((category) => (
-          <View key={category.id} style={styles.section}>
-            <View style={styles.sectionRow}>
-              {renderSectionTitle(category.label, "Sección")}
-              <AppButton
-                label="Ver todo"
-                variant="ghost"
-                onPress={() => navigate({ name: "category", category: category.id })}
-              />
+            {hasArticles ? (
+            <View style={styles.section}>
+              {renderSectionTitle("Últimas noticias", "Actualidad reciente")}
+              <View style={styles.latestList}>
+                {latest.map((article) => (
+                  <ArticleCard
+                    key={article.id}
+                    article={article}
+                    isSaved={isSaved(article)}
+                    onOpen={openArticle}
+                    onToggleSave={toggleSave}
+                    variant="compact"
+                  />
+                ))}
+              </View>
             </View>
-            {renderArticleGrid(category.articles)}
-          </View>
-        ))}
+            ) : null}
+
+            {hasArticles ? categoryArticles.map((category) => (
+              <View key={category.id} style={styles.section}>
+                <View style={styles.sectionRow}>
+                  {renderSectionTitle(category.label, "Sección")}
+                  <AppButton
+                    label="Ver todo"
+                    variant="ghost"
+                    onPress={() => navigate({ name: "category", category: category.id })}
+                  />
+                </View>
+                {renderArticleGrid(category.articles)}
+              </View>
+            )) : null}
+          </>
+        )}
       </>
     );
   };
-
-  const renderSections = () => (
-    <>
-      {renderNotice()}
-      {renderSectionTitle("Secciones", "Explorar")}
-      <View style={styles.directory}>
-        {CATEGORIES.map((category) => {
-          const count = getArticlesByCategory(category.id, articles).length;
-          return (
-            <Pressable
-              key={category.id}
-              accessibilityRole="button"
-              onPress={() => navigate({ name: "category", category: category.id })}
-              style={({ pressed }) => [styles.directoryItem, pressed ? styles.pressed : null]}
-            >
-              <View>
-                <Text style={styles.directoryTitle}>{category.label}</Text>
-                <Text style={styles.directoryMeta}>{count} noticias simuladas</Text>
-              </View>
-              <Text style={styles.directoryAction}>Abrir</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    </>
-  );
 
   const renderCategory = (category: CategoryId) => {
     const items = getArticlesByCategory(category, articles);
@@ -380,58 +880,6 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
         />
         {renderSectionTitle(getCategoryLabel(category), "Sección")}
         {renderArticleGrid(items)}
-      </>
-    );
-  };
-
-  const renderSearch = (query: string) => {
-    const results = searchArticles(query, articles);
-    const hasQuery = query.trim().length > 0;
-    return (
-      <>
-        {renderNotice()}
-        {renderSectionTitle("Buscar", "Archivo local")}
-        <View style={styles.searchBox}>
-          <Search size={20} color={colors.textSecondary} />
-          <TextInput
-            ref={searchInputRef}
-            accessibilityLabel="Buscar noticias"
-            placeholder="Buscar por tema, categoría o titular"
-            placeholderTextColor={colors.textSecondary}
-            value={query}
-            onChangeText={(nextQuery) => navigate({ name: "search", query: nextQuery }, true)}
-            style={styles.searchInput}
-            returnKeyType="search"
-          />
-        </View>
-
-        {!hasQuery ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Escribe para buscar en la edición demo</Text>
-            <Text style={styles.emptyText}>
-              Puedes probar con tecnología, mercado, lectura, transporte o canchas.
-            </Text>
-          </View>
-        ) : results.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No encontramos coincidencias</Text>
-            <Text style={styles.emptyText}>
-              Revisa la escritura o prueba con una categoría distinta.
-            </Text>
-            <AppButton
-              label="Limpiar búsqueda"
-              variant="secondary"
-              onPress={() => navigate({ name: "search", query: "" }, true)}
-            />
-          </View>
-        ) : (
-          <>
-            <Text style={styles.resultsCount}>
-              {results.length} resultado{results.length === 1 ? "" : "s"}
-            </Text>
-            {renderArticleGrid(results)}
-          </>
-        )}
       </>
     );
   };
@@ -463,8 +911,7 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>No encontramos esta noticia</Text>
             <Text style={styles.emptyText}>
-              Puede que el enlace esté incompleto o que la pieza ya no exista en el
-              dataset demo.
+              Puede que el enlace esté incompleto o que la pieza ya no exista en MongoDB.
             </Text>
             <AppButton label="Volver al inicio" onPress={() => navigate({ name: "home" })} />
           </View>
@@ -501,9 +948,7 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
           </Text>
 
           <ArticleImage image={currentArticle.image} size="lead" />
-          <Text style={styles.credit}>
-            Noticia simulada · {currentArticle.image.credit}
-          </Text>
+          <Text style={styles.credit}>{currentArticle.image.credit}</Text>
 
           <Pressable
             accessibilityRole="button"
@@ -539,15 +984,16 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
   };
 
   const renderContent = () => {
-    if (route.name === "sections") return renderSections();
-    if (route.name === "search") return renderSearch(route.query);
+    if (isFeedLoading) return renderLoading();
+    if (route.name === "adminCreate") return renderAdminCreate();
     if (route.name === "saved") return renderSaved();
     if (route.name === "category") return renderCategory(route.category);
     if (route.name === "article") return renderArticle();
     return renderHome();
   };
 
-  const activeBottom = route.name === "category" ? "sections" : route.name;
+  const activeBottom =
+    route.name === "adminCreate" ? "admin" : route.name === "saved" ? "saved" : "home";
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -565,20 +1011,18 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
           <View style={styles.headerNav}>
             <AppButton label="Inicio" variant="ghost" onPress={() => navigate({ name: "home" })} />
             <AppButton
-              label="Secciones"
-              variant="ghost"
-              onPress={() => navigate({ name: "sections" })}
-            />
-            <AppButton
-              label="Buscar"
-              variant="ghost"
-              onPress={() => navigate({ name: "search", query: "" })}
-            />
-            <AppButton
               label={`Guardados (${savedIds.length})`}
               variant="ghost"
               onPress={() => navigate({ name: "saved" })}
             />
+            {isAdmin ? (
+              <AppButton
+                label="Nueva noticia"
+                variant="ghost"
+                onPress={() => navigate({ name: "adminCreate" })}
+                icon={<FilePlus size={18} color={colors.action} />}
+              />
+            ) : null}
           </View>
         ) : null}
 
@@ -594,15 +1038,20 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
         </Pressable>
       </View>
 
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={[
-          styles.scrollContent,
-          isMobile ? styles.scrollContentMobile : null,
-        ]}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.contentFrame}
       >
-        <View style={styles.container}>{renderContent()}</View>
-      </ScrollView>
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[
+            styles.scrollContent,
+            isMobile ? styles.scrollContentMobile : null,
+          ]}
+        >
+          <View style={styles.container}>{renderContent()}</View>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {isMobile ? (
         <View style={styles.bottomNav}>
@@ -611,23 +1060,6 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
             active={activeBottom === "home"}
             icon={<Home size={20} color={activeBottom === "home" ? colors.action : colors.textSecondary} />}
             onPress={() => navigate({ name: "home" })}
-          />
-          <BottomNavItem
-            label="Secciones"
-            active={activeBottom === "sections"}
-            icon={
-              <Grid3X3
-                size={20}
-                color={activeBottom === "sections" ? colors.action : colors.textSecondary}
-              />
-            }
-            onPress={() => navigate({ name: "sections" })}
-          />
-          <BottomNavItem
-            label="Buscar"
-            active={activeBottom === "search"}
-            icon={<Search size={20} color={activeBottom === "search" ? colors.action : colors.textSecondary} />}
-            onPress={() => navigate({ name: "search", query: "" })}
           />
           <BottomNavItem
             label="Guardados"
@@ -640,9 +1072,35 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
             }
             onPress={() => navigate({ name: "saved" })}
           />
+          {isAdmin ? (
+            <BottomNavItem
+              label="Crear"
+              active={activeBottom === "admin"}
+              icon={
+                <FilePlus
+                  size={20}
+                  color={activeBottom === "admin" ? colors.action : colors.textSecondary}
+                />
+              }
+              onPress={() => navigate({ name: "adminCreate" })}
+            />
+          ) : null}
         </View>
       ) : null}
     </SafeAreaView>
+  );
+}
+
+function renderLoading() {
+  return (
+    <>
+      <Text style={styles.notice}>Feed conectado a MongoDB</Text>
+      <View style={styles.loadingState}>
+        <ActivityIndicator color={colors.action} />
+        <Text style={styles.loadingTitle}>Cargando noticias</Text>
+        <Text style={styles.emptyText}>Leyendo el feed desde MongoDB.</Text>
+      </View>
+    </>
   );
 }
 
@@ -731,6 +1189,9 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bodyMedium,
     fontSize: 14,
   },
+  contentFrame: {
+    flex: 1,
+  },
   scrollContent: {
     paddingVertical: spacing.lg,
   },
@@ -746,6 +1207,13 @@ const styles = StyleSheet.create({
   },
   notice: {
     color: colors.textSecondary,
+    fontFamily: fonts.bodyMedium,
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: spacing.md,
+  },
+  warningText: {
+    color: colors.danger,
     fontFamily: fonts.bodyMedium,
     fontSize: 13,
     lineHeight: 19,
@@ -891,11 +1359,28 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 16,
   },
+  clearSearchButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.pill,
+  },
   resultsCount: {
     color: colors.textSecondary,
     fontFamily: fonts.bodyMedium,
     fontSize: 14,
     marginVertical: spacing.md,
+  },
+  searchResultsBlock: {
+    marginTop: spacing.xl,
+    gap: spacing.md,
+  },
+  resultsTitle: {
+    color: colors.ink,
+    fontFamily: fonts.heading,
+    fontSize: 30,
+    lineHeight: 35,
   },
   emptyState: {
     padding: spacing.lg,
@@ -905,6 +1390,24 @@ const styles = StyleSheet.create({
     borderRadius: radii.panel,
     gap: spacing.sm,
     ...shadows.panel,
+  },
+  loadingState: {
+    minHeight: 220,
+    padding: spacing.lg,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radii.panel,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    ...shadows.panel,
+  },
+  loadingTitle: {
+    color: colors.ink,
+    fontFamily: fonts.heading,
+    fontSize: 24,
+    lineHeight: 29,
   },
   emptyTitle: {
     color: colors.ink,
@@ -923,6 +1426,121 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bodyMedium,
     fontSize: 14,
     lineHeight: 21,
+  },
+  successText: {
+    color: colors.success,
+    fontFamily: fonts.bodyMedium,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  adminShell: {
+    gap: spacing.xl,
+  },
+  adminIntro: {
+    maxWidth: layout.readerWidth,
+    gap: spacing.sm,
+  },
+  adminTitle: {
+    color: colors.ink,
+    fontFamily: fonts.heading,
+    fontSize: 38,
+    lineHeight: 42,
+  },
+  adminCopy: {
+    color: colors.textSecondary,
+    fontFamily: fonts.body,
+    fontSize: 16,
+    lineHeight: 25,
+  },
+  adminForm: {
+    width: "100%",
+    maxWidth: 920,
+    padding: spacing.lg,
+    borderRadius: radii.panel,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    gap: spacing.lg,
+    ...shadows.panel,
+  },
+  formSection: {
+    gap: spacing.sm,
+  },
+  formSectionTitle: {
+    color: colors.ink,
+    fontFamily: fonts.heading,
+    fontSize: 24,
+    lineHeight: 29,
+  },
+  fieldGroup: {
+    gap: spacing.xs,
+  },
+  fieldLabel: {
+    color: colors.text,
+    fontFamily: fonts.bodyMedium,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  formInput: {
+    minHeight: 48,
+    borderColor: colors.controlBorder,
+    borderRadius: radii.control,
+    borderWidth: 1,
+    color: colors.text,
+    fontFamily: fonts.body,
+    fontSize: 16,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surface,
+  },
+  formTextArea: {
+    minHeight: 116,
+    lineHeight: 24,
+  },
+  formChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
+  formChip: {
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    borderColor: colors.border,
+    borderWidth: 1,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  formChipActive: {
+    backgroundColor: colors.actionSoft,
+    borderColor: colors.action,
+  },
+  formChipLabel: {
+    color: colors.text,
+    fontFamily: fonts.bodyMedium,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  formChipLabelActive: {
+    color: colors.action,
+  },
+  formHint: {
+    color: colors.textSecondary,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  inlineLoading: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  adminActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
   },
   articleView: {
     width: "100%",

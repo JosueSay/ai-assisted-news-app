@@ -10,14 +10,25 @@ from news.config import NewsSettings
 from news.database import NewsDatabaseError, close_client, get_news_client, get_news_database, ping_database
 
 
+def make_settings(**overrides) -> NewsSettings:
+    defaults = {
+        "mongodb_mode": "atlas",
+        "mongodb_database": "test_news",
+        "mongodb_uri_file": Path("/fake/uri_file"),
+        "mongodb_local_uri": "mongodb://news-mongo:27017/test_news",
+        "mongodb_required": True,
+        "mongodb_timeout_ms": 5000,
+        "admin_username": "admin",
+        "admin_password_file": Path("/fake/admin_password"),
+        "admin_token_ttl_seconds": 3600,
+    }
+    defaults.update(overrides)
+    return NewsSettings(**defaults)
+
+
 class TestGetNewsClient:
     def test_get_news_client_creates_client_with_expected_settings(self) -> None:
-        settings = NewsSettings(
-            mongodb_database="test_news",
-            mongodb_uri_file=Path("/fake/uri_file"),
-            mongodb_required=True,
-            mongodb_timeout_ms=5000,
-        )
+        settings = make_settings()
         fake_uri = "mongodb://fake:27017"
         with patch("news.database.load_secret", return_value=fake_uri) as mock_load:
             with patch("news.database.MongoClient") as mock_mongo:
@@ -32,15 +43,27 @@ class TestGetNewsClient:
         )
         assert client == mock_mongo.return_value
 
+    def test_get_news_client_uses_local_uri_without_secret_loader(self) -> None:
+        settings = make_settings(
+            mongodb_mode="local",
+            mongodb_local_uri="mongodb://news-mongo:27017/test_news",
+        )
+        with patch("news.database.load_secret") as mock_load:
+            with patch("news.database.MongoClient") as mock_mongo:
+                get_news_client(settings)
+
+        mock_load.assert_not_called()
+        mock_mongo.assert_called_once_with(
+            "mongodb://news-mongo:27017/test_news",
+            appname="ai-assisted-news",
+            serverSelectionTimeoutMS=5000,
+            uuidRepresentation="standard",
+        )
+
 
 class TestGetNewsDatabase:
     def test_get_news_database_selects_database(self) -> None:
-        settings = NewsSettings(
-            mongodb_database="test_news",
-            mongodb_uri_file=Path("/fake/uri_file"),
-            mongodb_required=True,
-            mongodb_timeout_ms=5000,
-        )
+        settings = make_settings()
         mock_client = MagicMock()
         with patch("news.database.get_news_client", return_value=mock_client):
             db = get_news_database(settings)
@@ -50,12 +73,7 @@ class TestGetNewsDatabase:
 
 class TestPingDatabase:
     def test_ping_database_success(self) -> None:
-        settings = NewsSettings(
-            mongodb_database="test_news",
-            mongodb_uri_file=Path("/fake/uri_file"),
-            mongodb_required=True,
-            mongodb_timeout_ms=5000,
-        )
+        settings = make_settings()
         mock_database = MagicMock()
         mock_client = MagicMock()
         mock_client.__getitem__.return_value = mock_database
@@ -68,12 +86,7 @@ class TestPingDatabase:
         mock_client.close.assert_called_once()
 
     def test_ping_database_failure(self) -> None:
-        settings = NewsSettings(
-            mongodb_database="test_news",
-            mongodb_uri_file=Path("/fake/uri_file"),
-            mongodb_required=True,
-            mongodb_timeout_ms=5000,
-        )
+        settings = make_settings()
         mock_database = MagicMock()
         mock_database.command.side_effect = PyMongoError("connection refused")
         mock_client = MagicMock()
@@ -87,12 +100,7 @@ class TestPingDatabase:
 
     def test_ping_database_error_sanitized(self) -> None:
         fake_uri = "mongodb://user:secret@host:27017"
-        settings = NewsSettings(
-            mongodb_database="test_news",
-            mongodb_uri_file=Path("/fake/uri_file"),
-            mongodb_required=True,
-            mongodb_timeout_ms=5000,
-        )
+        settings = make_settings()
         mock_database = MagicMock()
         mock_database.command.side_effect = PyMongoError("connection refused")
         mock_client = MagicMock()

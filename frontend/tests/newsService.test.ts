@@ -1,38 +1,94 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CATEGORIES } from "../src/types";
+import type { NewsArticle } from "../src/types";
 import {
-  fetchNewsFeed,
+  fetchNewsFeedWithStatus,
   getArticleBySlug,
+  getFeaturedArticles,
   searchArticles,
 } from "../src/services/newsService";
 
-describe("fetchNewsFeed", () => {
-  it("returns the editorial demo dataset with required fields", async () => {
-    const articles = await fetchNewsFeed();
+const articles: NewsArticle[] = [
+  {
+    id: "1",
+    slug: "sensores-huertos-urbanos",
+    title: "Jóvenes desarrollan sensores para cuidar los huertos urbanos",
+    summary: "Sensores de bajo costo para riego comunitario.",
+    category: "tecnologia",
+    author: "Redacción",
+    publishedAt: "2026-10-04T07:20:00-06:00",
+    body: ["Primer párrafo.", "Segundo párrafo."],
+    readingMinutes: 2,
+    source: "MongoDB",
+    image: {
+      src: null,
+      alt: "Huerto urbano",
+      width: 960,
+      height: 540,
+      credit: "Sin imagen",
+      sourceUrl: "",
+      license: "Pendiente",
+    },
+  },
+  {
+    id: "2",
+    slug: "bibliotecas-ruta-lectura",
+    title: "Bibliotecas abren una ruta de lectura",
+    summary: "Lecturas al aire libre para barrios.",
+    category: "cultura",
+    author: "Redacción",
+    publishedAt: "2026-10-03T07:20:00-06:00",
+    body: ["Contenido."],
+    readingMinutes: 1,
+    source: "MongoDB",
+    image: {
+      src: null,
+      alt: "Biblioteca",
+      width: 960,
+      height: 540,
+      credit: "Sin imagen",
+      sourceUrl: "",
+      license: "Pendiente",
+    },
+  },
+];
 
-    expect(articles).toHaveLength(20);
-    for (const category of CATEGORIES) {
-      expect(articles.filter((article) => article.category === category.id)).toHaveLength(4);
-    }
-    for (const article of articles) {
-      expect(article.id).toBeTruthy();
-      expect(article.slug).toBeTruthy();
-      expect(article.title).toBeTruthy();
-      expect(article.summary).toBeTruthy();
-      expect(article.author).toBeTruthy();
-      expect(article.body.length).toBeGreaterThanOrEqual(4);
-      expect(new Date(article.publishedAt).toString()).not.toBe("Invalid Date");
-      expect(article.isDemo).toBe(true);
-    }
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("newsService", () => {
+  it("fetches the feed from the configured API without local fallback data", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => articles,
+      })),
+    );
+
+    const result = await fetchNewsFeedWithStatus();
+
+    expect(result.error).toBeNull();
+    expect(result.articles).toHaveLength(2);
+    expect(result.articles[0].slug).toBe("sensores-huertos-urbanos");
   });
 
-  it("supports article lookup and accent-insensitive local search", async () => {
-    const articles = await fetchNewsFeed();
-    const article = getArticleBySlug("sensores-huertos-urbanos", articles);
+  it("returns an empty feed when MongoDB/API cannot be read", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503 })));
 
-    expect(article?.category).toBe("tecnologia");
-    expect(searchArticles("tecnologia", articles).length).toBeGreaterThan(0);
-    expect(searchArticles("bibliotecas", articles).length).toBeGreaterThan(0);
+    const result = await fetchNewsFeedWithStatus();
+
+    expect(result.articles).toEqual([]);
+    expect(result.error).toBe("No pudimos leer noticias desde MongoDB.");
+  });
+
+  it("supports article lookup, featured selection and accent-insensitive search", () => {
+    expect(getArticleBySlug("sensores-huertos-urbanos", articles)?.category).toBe(
+      "tecnologia",
+    );
+    expect(getFeaturedArticles(articles).lead?.id).toBe("1");
+    expect(searchArticles("tecnologia", articles)).toHaveLength(1);
+    expect(searchArticles("bibliotecas", articles)).toHaveLength(1);
   });
 });

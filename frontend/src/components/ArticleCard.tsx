@@ -2,9 +2,8 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Bookmark, BookmarkCheck } from "lucide-react-native";
 
 import { ArticleImage } from "./ArticleImage";
-import { getCategoryLabel } from "../data/demoArticles";
 import { colors, fonts, radii, spacing } from "../theme";
-import type { NewsArticle } from "../types";
+import { getCategoryLabel, type NewsArticle } from "../types";
 
 type Variant = "lead" | "standard" | "secondary" | "compact";
 

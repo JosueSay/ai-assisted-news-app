@@ -1,8 +1,9 @@
 # Frontend
 
 App móvil (Expo + React Native + TypeScript) con login de Google y un feed de
-noticias de demostración. Corre igual en iPhone y Android sin necesitar Mac
-ni cuenta de Apple para probarla, usando la app **Expo Go**.
+noticias leído desde la API `news-api` conectada a MongoDB. Corre igual en
+iPhone y Android sin necesitar Mac ni cuenta de Apple para probarla, usando la
+app **Expo Go**.
 
 ## Ejecutar
 
@@ -48,9 +49,36 @@ REACT_NATIVE_PACKAGER_HOSTNAME=192.168.1.50 docker compose up --build frontend
 Si configuras Google Sign-In real, crea `frontend/.env` desde `.env.example`;
 Compose lo carga automaticamente cuando existe.
 
+## Feed conectado a MongoDB local
+
+Desde la raíz del proyecto:
+
+```bash
+make db-init
+make db-seed-catalog
+docker compose up -d --build frontend
+```
+
+Servicios esperados:
+
+```text
+news-mongo   http://localhost:27018
+news-api     http://localhost:8020
+frontend     http://localhost:8081
+```
+
+El frontend consume `EXPO_PUBLIC_NEWS_API_BASE_URL`, que en el `.env` raíz queda como:
+
+```dotenv
+EXPO_PUBLIC_NEWS_API_BASE_URL=http://localhost:8020
+```
+
+Si la API no responde, la app muestra un estado de error. No existe un dataset
+local de respaldo en el frontend.
+
 ## Qué vas a ver
 
-Al abrir la app aparece la pantalla de login con dos botones:
+Al abrir la app aparece la pantalla de login con tres accesos:
 
 - **"Continuar como invitado"** — entra directo, sin configuración previa.
   Es la forma más rápida de mostrar la experiencia completa (feed de
@@ -58,6 +86,10 @@ Al abrir la app aparece la pantalla de login con dos botones:
 - **"Iniciar sesión con Google"** — queda deshabilitado hasta configurar
   credenciales reales (ver abajo). Sin configurar, el hint en pantalla lo
   explica.
+- **"Acceso admin"** — muestra usuario/contraseña local. Requiere completar
+  `keys/news_admin_password` y tener levantada la API local. Al entrar como
+  admin aparece **Nueva noticia**, una sección para crear publicaciones o
+  guardar borradores en MongoDB.
 
 ## Google Sign-In real
 
@@ -112,7 +144,7 @@ frontend/
 │   │   └── news/           # NewsFeedScreen
 │   └── services/
 │       ├── googleAuth.ts   # OAuth con Google + sesión de invitado
-│       └── newsService.ts  # feed de noticias (demo hoy, reemplazable)
+│       └── newsService.ts  # feed desde API local/MongoDB
 └── tests/
     └── newsService.test.ts
 ```
