@@ -8,6 +8,10 @@ export const CATEGORIES = [
 
 export type CategoryId = (typeof CATEGORIES)[number]["id"];
 
+export function getCategoryLabel(categoryId: CategoryId) {
+  return CATEGORIES.find((category) => category.id === categoryId)?.label ?? categoryId;
+}
+
 export type ArticleImage = {
   src: string | null;
   alt: string;
@@ -28,7 +32,6 @@ export type NewsArticle = {
   publishedAt: string;
   body: string[];
   readingMinutes: number;
-  isDemo: true;
   source: string;
   image: ArticleImage;
 };
@@ -39,4 +42,6 @@ export type AppUser = {
   email: string;
   photoUrl?: string;
   isGuest: boolean;
+  role?: "user" | "admin";
+  adminToken?: string;
 };

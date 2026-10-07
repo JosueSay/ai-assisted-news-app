@@ -15,6 +15,7 @@ Bloque de documentos que define el contenido de la base de datos y las reglas qu
 | [05 Tiempo de lectura](05-tiempo-de-lectura.md) | Campos de duración estimada y datos derivables |
 | [06 Decisiones descartadas](06-decisiones-descartadas.md) | Campos y colecciones que se quitaron, con su motivo |
 | [07 Diagrama](07-diagrama.md) | Colecciones, documentos embebidos y referencias lógicas |
+| [08 Índices y validación](08-indices-y-validacion.md) | Estructura física MongoDB: validators, índices únicos, consultas y TTL |
 
 ## Cómo leer los criterios
 

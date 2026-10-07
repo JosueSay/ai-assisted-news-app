@@ -43,10 +43,13 @@ def get_news_client(settings: NewsSettings) -> MongoClient:
     Raises:
         NewsDatabaseError: Si no se puede leer el secreto.
     """
-    try:
-        uri = load_secret(settings.mongodb_uri_file)
-    except SecretFileError as error:
-        raise NewsDatabaseError(str(error)) from error
+    if settings.mongodb_mode == "local":
+        uri = settings.mongodb_local_uri
+    else:
+        try:
+            uri = load_secret(settings.mongodb_uri_file)
+        except SecretFileError as error:
+            raise NewsDatabaseError(str(error)) from error
     return _build_client(uri, settings.mongodb_timeout_ms)
 
 
@@ -89,7 +92,7 @@ def ping_database(settings: NewsSettings) -> dict[str, str]:
     except PyMongoError as error:
         raise NewsDatabaseError(
             "No fue posible conectar con MongoDB. "
-            "Verificá la URI en keys/mongodb_uri y la conectividad de red."
+            "Verificá la configuración de MongoDB y la conectividad de red."
         ) from error
     finally:
         client.close()

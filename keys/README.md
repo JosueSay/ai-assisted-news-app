@@ -15,6 +15,7 @@ ejecutar el proyecto en entorno local.
 | Archivo | Propósito | ¿Debe crearlo el desarrollador? |
 | --- | --- | --- |
 | `mongodb_uri` | URI de conexión a MongoDB Atlas para la aplicación de noticias. | Sí |
+| `news_admin_password` | Contraseña local del usuario admin para crear noticias manualmente. | Sí |
 | `client_id` | Identificador de cliente para autenticación futura (reservado). | Sí (vacío) |
 | `client_secret` | Secreto de cliente para autenticación futura (reservado). | Sí (vacío) |
 
@@ -40,6 +41,12 @@ mongodb+srv://usuario:contraseña@cluster.xxxxx.mongodb.net/
 
 Reservados para autenticación futura. Deben estar presentes aunque vacíos. No son leídos,
 validados ni utilizados por la infraestructura de MongoDB actual.
+
+### `news_admin_password`
+
+Contiene únicamente la contraseña del admin local usado por `POST /admin/login`.
+Debe tener un valor no vacío antes de intentar crear noticias desde el panel admin.
+No colocar esta contraseña en `.env`, `.env.example`, logs ni commits.
 
 ## Cómo crear `mongodb_uri`
 

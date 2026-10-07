@@ -4,6 +4,7 @@ import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { loginAdmin } from "./newsService";
 import type { AppUser } from "../types";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -120,10 +121,36 @@ export function useGoogleAuth() {
     await persistUser({
       id: "guest",
       name: "Invitado",
-      email: "invitado@demo.local",
+      email: "invitado@local.news",
       isGuest: true,
+      role: "user",
     });
   }, [persistUser]);
+
+  const signInAsAdmin = useCallback(
+    async (username: string, password: string) => {
+      setError(null);
+      setIsLoading(true);
+      try {
+        const session = await loginAdmin(username, password);
+        await persistUser({
+          id: `admin:${session.username}`,
+          name: `Admin ${session.username}`,
+          email: `${session.username}@local.admin`,
+          isGuest: false,
+          role: "admin",
+          adminToken: session.accessToken,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "No pudimos iniciar sesión admin.";
+        setError(message);
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [persistUser],
+  );
 
   const signOut = useCallback(async () => {
     setUser(null);
@@ -138,6 +165,7 @@ export function useGoogleAuth() {
     canPromptGoogle: Boolean(request),
     signInWithGoogle,
     signInAsGuest,
+    signInAsAdmin,
     signOut,
   };
 }

@@ -69,6 +69,7 @@ services:
       REACT_NATIVE_PACKAGER_HOSTNAME: ${REACT_NATIVE_PACKAGER_HOSTNAME:-}
       CHOKIDAR_USEPOLLING: "true"
       WATCHPACK_POLLING: "true"
+      EXPO_PUBLIC_NEWS_API_BASE_URL: ${EXPO_PUBLIC_NEWS_API_BASE_URL:-http://localhost:8020}
     ports:
       - "${EXPO_PORT:-8081}:${EXPO_PORT:-8081}"
       - "19000:19000"
@@ -89,6 +90,101 @@ services:
       ]
     stdin_open: true
     tty: true
+    depends_on:
+      news-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  news-mongo:
+    profiles: ["news-local"]
+    image: mongo:8.0
+    environment:
+      MONGO_INITDB_DATABASE: ${NEWS_MONGODB_DATABASE:-ai_assisted_news}
+      GLIBC_TUNABLES: glibc.pthread.rseq=1
+    ports:
+      - "${NEWS_LOCAL_MONGO_PORT:-27018}:27017"
+    volumes:
+      - news_mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped
+
+  news-tools:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: backend/news/Dockerfile
+      target: tools
+    working_dir: /app/backend
+    environment:
+      NEWS_DB_MODE: ${NEWS_DB_MODE:-local}
+      NEWS_MONGODB_DATABASE: ${NEWS_MONGODB_DATABASE:-ai_assisted_news}
+      NEWS_MONGODB_REQUIRED: ${NEWS_MONGODB_REQUIRED:-true}
+      NEWS_MONGODB_TIMEOUT_MS: ${NEWS_MONGODB_TIMEOUT_MS:-5000}
+      NEWS_MONGODB_URI_FILE: /app/keys/mongodb_uri
+      NEWS_MONGODB_LOCAL_URI: mongodb://news-mongo:27017/${NEWS_MONGODB_DATABASE:-ai_assisted_news}
+      NEWS_ADMIN_USERNAME: ${NEWS_ADMIN_USERNAME:-admin}
+      NEWS_ADMIN_PASSWORD_FILE: /app/keys/news_admin_password
+      NEWS_ADMIN_TOKEN_TTL_SECONDS: ${NEWS_ADMIN_TOKEN_TTL_SECONDS:-3600}
+      PYTEST_ADDOPTS: -p no:cacheprovider
+    volumes:
+      - ./backend:/app/backend
+      - ./keys:/app/keys:ro
+    restart: "no"
+
+  news-api:
+    build:
+      context: .
+      dockerfile: backend/news/Dockerfile
+      target: tools
+    working_dir: /app/backend
+    command:
+      [
+        "python",
+        "-m",
+        "uvicorn",
+        "news.api:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8020",
+      ]
+    environment:
+      NEWS_DB_MODE: ${NEWS_DB_MODE:-local}
+      NEWS_MONGODB_DATABASE: ${NEWS_MONGODB_DATABASE:-ai_assisted_news}
+      NEWS_MONGODB_REQUIRED: ${NEWS_MONGODB_REQUIRED:-true}
+      NEWS_MONGODB_TIMEOUT_MS: ${NEWS_MONGODB_TIMEOUT_MS:-5000}
+      NEWS_MONGODB_URI_FILE: /app/keys/mongodb_uri
+      NEWS_MONGODB_LOCAL_URI: mongodb://news-mongo:27017/${NEWS_MONGODB_DATABASE:-ai_assisted_news}
+      NEWS_ADMIN_USERNAME: ${NEWS_ADMIN_USERNAME:-admin}
+      NEWS_ADMIN_PASSWORD_FILE: /app/keys/news_admin_password
+      NEWS_ADMIN_TOKEN_TTL_SECONDS: ${NEWS_ADMIN_TOKEN_TTL_SECONDS:-3600}
+      NEWS_API_ALLOWED_ORIGINS: ${NEWS_API_ALLOWED_ORIGINS:-http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006,http://127.0.0.1:19006}
+    ports:
+      - "${NEWS_API_PORT:-8020}:8020"
+    volumes:
+      - ./backend:/app/backend
+      - ./keys:/app/keys:ro
+    depends_on:
+      news-mongo:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8020/health')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
     restart: unless-stopped
 
   tests:
@@ -110,3 +206,4 @@ services:
 
 volumes:
   assistant_mongo_data:
+  news_mongo_data:

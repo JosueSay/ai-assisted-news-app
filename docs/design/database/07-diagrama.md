@@ -91,7 +91,7 @@ erDiagram
         ObjectId simulatedLocationId FK
         array messages "embebido"
         date createdAt
-        date expiresAt "TTL futuro"
+        date expiresAt "TTL"
     }
 
     aiUsage {
@@ -151,8 +151,8 @@ erDiagram
 - `users.firebaseUid` — identificador externo desde Firebase Authentication.
 - `news.slug` — identificador legible de la noticia.
 
-## TTL futuro
+## TTL
 
-`chatSessions` tendrá un índice TTL sobre `expiresAt`. La creación del índice corresponde
-a un loop posterior. El modelo ya incluye el campo `expiresAt` con valor por defecto de
-3600 segundos desde la creación.
+`chatSessions` tiene un índice TTL sobre `expiresAt` con `expireAfterSeconds: 0`. El modelo
+calcula `expiresAt` con 3600 segundos de vigencia por defecto y MongoDB elimina la sesión cuando
+esa fecha ya venció.

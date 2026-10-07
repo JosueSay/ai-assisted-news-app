@@ -33,6 +33,7 @@ export default function App() {
     canPromptGoogle,
     signInWithGoogle,
     signInAsGuest,
+    signInAsAdmin,
     signOut,
   } = useGoogleAuth();
 
@@ -58,6 +59,7 @@ export default function App() {
           canPromptGoogle={canPromptGoogle}
           onSignInWithGoogle={() => void signInWithGoogle()}
           onSignInAsGuest={() => void signInAsGuest()}
+          onSignInAsAdmin={(username, password) => signInAsAdmin(username, password)}
         />
       )}
     </>
