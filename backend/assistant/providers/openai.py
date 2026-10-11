@@ -32,7 +32,8 @@ class OpenAIChatProvider:
     def __init__(self, settings: Settings, client: AsyncOpenAI | None = None) -> None:
         if not settings.api_key:
             raise ChatbotConfigurationError(
-                "Falta API_GPT. Configurala o usá CHATBOT_PROVIDER=stub para pruebas."
+                "Falta API_GPT (o keys/openai_api_key). Configurala o usá CHATBOT_PROVIDER=stub "
+                "para pruebas."
             )
         self._settings = settings
         self._client = client or AsyncOpenAI(
@@ -48,11 +49,13 @@ class OpenAIChatProvider:
         previous_response_id: str | None,
         context: dict[str, object],
         user_id: str | None,
+        history: list[dict[str, str]] | None = None,
     ) -> ProviderResponse:
         input_items: str | list[dict[str, str]] = message
-        if context:
+        if context or history is not None:
             input_items = [
-                {"role": "developer", "content": render_context(context)},
+                *(history or []),
+                *([{"role": "developer", "content": render_context(context)}] if context else []),
                 {"role": "user", "content": message},
             ]
 
@@ -62,9 +65,10 @@ class OpenAIChatProvider:
             "input": input_items,
             "max_output_tokens": self._settings.max_output_tokens,
             "reasoning": {"effort": "low"},
-            "store": True,
+            # Con historial propio la conversación vive en MongoDB y OpenAI no la almacena.
+            "store": history is None,
         }
-        if previous_response_id:
+        if previous_response_id and history is None:
             options["previous_response_id"] = previous_response_id
         if user_id:
             options["safety_identifier"] = sha256(user_id.encode("utf-8")).hexdigest()[:32]
@@ -89,4 +93,11 @@ class OpenAIChatProvider:
         answer = response.output_text.strip()
         if not answer:
             raise OpenAIProviderError("El servicio de IA devolvió una respuesta vacía.")
-        return ProviderResponse(answer, response.id, response.model)
+        usage = getattr(response, "usage", None)
+        return ProviderResponse(
+            answer,
+            response.id,
+            response.model,
+            input_tokens=getattr(usage, "input_tokens", None),
+            output_tokens=getattr(usage, "output_tokens", None),
+        )

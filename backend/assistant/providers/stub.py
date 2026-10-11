@@ -14,8 +14,9 @@ class StubChatProvider:
         previous_response_id: str | None,
         context: dict[str, object],
         user_id: str | None,
+        history: list[dict[str, str]] | None = None,
     ) -> ProviderResponse:
-        del instructions, previous_response_id, user_id
+        del instructions, previous_response_id, user_id, history
         context_status = "con contexto" if context else "sin contexto"
         return ProviderResponse(
             message=f"[stub {context_status}] Respuesta para: {message}",
