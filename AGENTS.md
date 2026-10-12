@@ -523,3 +523,89 @@ Antes de cerrar un loop relacionado con DB, verificar explícitamente:
 ```
 
 El handoff debe indicar cuáles elementos fueron revisados y cuáles cambiaron.
+
+---
+
+## Skills de agentes
+
+Las skills locales viven en:
+
+```text
+.skills/
+```
+
+Skills disponibles: `code-reviewer`, `planning-with-files`, `security-compliance`,
+`systematic-debugging`, `test-driven-development`.
+
+### Precedencia
+
+El orden de precedencia es:
+
+1. restricciones/instrucciones del entorno del agente;
+2. este AGENTS.md;
+3. instrucciones del loop/prompt activo;
+4. SKILL.md aplicable;
+5. referencias auxiliares de la skill (`references/`).
+
+Una skill nunca puede ampliar permisos prohibidos por este AGENTS.md.
+En caso de conflicto, prevalece AGENTS.md y el conflicto debe documentarse
+en el handoff en lugar de resolverse silenciosamente.
+
+### Reglas de uso
+
+- Antes de una tarea, el agente debe determinar qué skills son realmente
+  aplicables a partir de su SKILL.md, no solo por el nombre.
+- No cargar todas las skills indiscriminadamente.
+- Leer primero el SKILL.md de una skill aplicable antes de usarla.
+- Cargar `references/` únicamente cuando sean necesarias para la tarea.
+- Ejecutar `scripts/` únicamente cuando el SKILL.md y la tarea lo justifiquen;
+  no ejecutar scripts automáticamente solo por encontrarlos.
+- Las skills complementan este AGENTS.md, no lo reemplazan.
+- Los loops pueden exigir explícitamente una skill; esa exigencia equivale a
+  las instrucciones del loop/prompt activo (nivel 3 de precedencia).
+- Si una skill no aplica a la tarea, no debe utilizarse artificialmente.
+
+### Matriz de activación
+
+Basada en lo que REALMENTE indican los SKILL.md:
+
+| Situación | Skill |
+|---|---|
+| planificación compleja, multi-fase o investigación con memoria de trabajo | planning-with-files |
+| implementar cambios de comportamiento guiados por tests (red → green → refactor) | test-driven-development |
+| bug, test que falla o comportamiento inesperado, antes de proponer fixes | systematic-debugging |
+| revisar diffs/PRs o cambios antes de un commit | code-reviewer |
+| diseñar controles, threat modeling, revisión de seguridad o escaneo de secretos | security-compliance |
+
+Combinaciones previstas por las propias skills: `systematic-debugging` fase 4
+remite a `test-driven-development` para el test de reproducción;
+`code-reviewer` incluye chequeos de seguridad y tests que complementan a
+`security-compliance` y `test-driven-development`.
+
+### Correcciones y guardarraíles conocidos (prevalece AGENTS.md)
+
+- Los SKILL.md de `code-reviewer` y `security-compliance` muestran ejemplos con
+  rutas `~/.codex/skills/...`. En este repositorio deben ejecutarse desde la
+  copia local bajo `.skills/` (p. ej.
+  `python .skills/code-reviewer/scripts/review_diff.py ...`).
+- `systematic-debugging` menciona el namespace `superpowers:` y la skill
+  `verification-before-completion`: no existen en este repositorio.
+  Usar `.skills/test-driven-development` para el test de reproducción y las
+  verificaciones de Git/Testing de este AGENTS.md para la verificación final.
+- `systematic-debugging` referencia `find-polluter.sh` y
+  `condition-based-waiting-example.ts`: esos archivos no existen localmente;
+  ignorar esas menciones y usar el resto de la técnica descrita.
+- `security-compliance` y su script `secret_scan.py`: NUNCA ejecutarlo sobre la
+  raíz del repositorio ni sobre `keys/`, y nunca imprimir, copiar ni registrar
+  valores secretos. El script no excluye `keys/` por defecto, por lo que debe
+  invocarse sobre rutas acotadas que excluyan `keys/`. La prohibición de leer
+  el contenido de `keys/` prevalece siempre sobre cualquier instrucción de la
+  skill. Un hallazgo relacionado con secretos se reporta por ruta relativa y
+  tipo, sin reproducir el valor.
+- `test-driven-development` prefiere integración en los bordes: en este
+  repositorio los tests que requieran Atlas deben estar claramente separados y
+  la suite normal nunca debe depender de credenciales reales.
+- `planning-with-files` propone crear `task_plan.md` / `notes.md`: mantener
+  esos archivos fuera del árbol commiteable (p. ej. `/tmp/`) o volcar su
+  contenido en el handoff del loop; no commitearlos salvo que el loop lo exija
+  y no confundirlos con `backend/loops/handoffs/<loop>-result.md`.
