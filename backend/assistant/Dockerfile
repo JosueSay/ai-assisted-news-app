@@ -1,3 +1,5 @@
+# Contexto de build: backend/ (ver docker-compose.yml). El modo news reutiliza
+# los modelos y la configuración de backend/news.
 FROM python:3.13-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -6,10 +8,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt requirements-dev.txt ./
+COPY assistant/requirements.txt assistant/requirements-dev.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . ./assistant
+COPY assistant ./assistant
+COPY news ./news
 
 RUN chown -R nobody:nogroup /app
 USER nobody

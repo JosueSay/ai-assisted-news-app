@@ -19,29 +19,39 @@ services:
     restart: unless-stopped
 
   chatbot:
+    # Chatbot del assistant en modo news: lee ai_assisted_news (local o Atlas).
     build:
-      context: ./backend/assistant
+      context: ./backend
+      dockerfile: assistant/Dockerfile
       target: runtime
     environment:
       CHATBOT_PROVIDER: ${CHATBOT_PROVIDER:-stub}
-      API_GPT: ${API_GPT:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
-      CHATBOT_PROMPT_FILE: prompts/system.md
-      CHATBOT_PROMPT_VERSION: ${CHATBOT_PROMPT_VERSION:-assistant-v1}
-      CHATBOT_ALLOWED_ORIGINS: ${CHATBOT_ALLOWED_ORIGINS:-http://localhost:3000}
-      MONGODB_URI: mongodb://mongo:27017/assistant
-      MONGODB_DATABASE: assistant
+      OPENAI_API_KEY_FILE: /app/keys/openai_api_key
+      CHATBOT_PROMPT_FILE: prompts/news.md
+      CHATBOT_PROMPT_VERSION: ${CHATBOT_PROMPT_VERSION:-news-v1}
+      CHATBOT_ALLOWED_ORIGINS: ${CHATBOT_ALLOWED_ORIGINS:-http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006,http://127.0.0.1:19006}
+      MONGODB_CONTEXT_MODE: news
       MONGODB_REQUIRED: "true"
-      MONGODB_CONTEXT_MODE: projection
-      MONGODB_CONTEXT_COLLECTION: assistant_contexts
-      MONGODB_USER_ID_TYPE: string
+      NEWS_DB_MODE: ${NEWS_DB_MODE:-local}
+      NEWS_MONGODB_DATABASE: ${NEWS_MONGODB_DATABASE:-ai_assisted_news}
+      NEWS_MONGODB_TIMEOUT_MS: ${NEWS_MONGODB_TIMEOUT_MS:-5000}
+      NEWS_MONGODB_URI_FILE: /app/keys/mongodb_uri
+      NEWS_MONGODB_LOCAL_URI: mongodb://news-mongo:27017/${NEWS_MONGODB_DATABASE:-ai_assisted_news}
+      CHAT_SESSION_TTL_SECONDS: ${CHAT_SESSION_TTL_SECONDS:-3600}
+      NEWS_AI_BUDGET_USD: ${NEWS_AI_BUDGET_USD:-20}
+      NEWS_CHAT_INPUT_USD_PER_MILLION: ${NEWS_CHAT_INPUT_USD_PER_MILLION:-}
+      NEWS_CHAT_OUTPUT_USD_PER_MILLION: ${NEWS_CHAT_OUTPUT_USD_PER_MILLION:-}
+      NEWS_CHAT_DEFAULT_LOCATION_CODE: ${NEWS_CHAT_DEFAULT_LOCATION_CODE:-GT}
     ports:
       - "8010:8010"
     volumes:
       - ./backend/assistant/prompts:/app/assistant/prompts:ro
+      - ./keys:/app/keys:ro
     depends_on:
-      mongo:
+      news-mongo:
         condition: service_healthy
+        required: false
     healthcheck:
       test:
         [
@@ -70,6 +80,7 @@ services:
       CHOKIDAR_USEPOLLING: "true"
       WATCHPACK_POLLING: "true"
       EXPO_PUBLIC_NEWS_API_BASE_URL: ${EXPO_PUBLIC_NEWS_API_BASE_URL:-http://localhost:8020}
+      EXPO_PUBLIC_ASSISTANT_API_BASE_URL: ${EXPO_PUBLIC_ASSISTANT_API_BASE_URL:-http://localhost:8010}
     ports:
       - "${EXPO_PORT:-8081}:${EXPO_PORT:-8081}"
       - "19000:19000"
@@ -190,7 +201,8 @@ services:
   tests:
     profiles: ["test"]
     build:
-      context: ./backend/assistant
+      context: ./backend
+      dockerfile: assistant/Dockerfile
       target: test
     command: ["python", "-m", "pytest", "-q", "assistant/tests"]
     environment:

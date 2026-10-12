@@ -16,6 +16,7 @@ ejecutar el proyecto en entorno local.
 | --- | --- | --- |
 | `mongodb_uri` | URI de conexión a MongoDB Atlas para la aplicación de noticias. | Sí |
 | `news_admin_password` | Contraseña local del usuario admin para crear noticias manualmente. | Sí |
+| `openai_api_key` | API key de OpenAI del chatbot de noticias (`backend/assistant` en modo news). Solo se usa con `CHATBOT_PROVIDER=openai`. | Sí (puede quedar vacío con `CHATBOT_PROVIDER=stub`) |
 | `client_id` | Identificador de cliente para autenticación futura (reservado). | Sí (vacío) |
 | `client_secret` | Secreto de cliente para autenticación futura (reservado). | Sí (vacío) |
 
@@ -47,6 +48,20 @@ validados ni utilizados por la infraestructura de MongoDB actual.
 Contiene únicamente la contraseña del admin local usado por `POST /admin/login`.
 Debe tener un valor no vacío antes de intentar crear noticias desde el panel admin.
 No colocar esta contraseña en `.env`, `.env.example`, logs ni commits.
+
+### `openai_api_key`
+
+Contiene únicamente la API key de OpenAI del chatbot (`POST /chat` en el puerto 8010). Con
+`CHATBOT_PROVIDER=stub` (valor por defecto en Compose) no se usa y puede quedar vacío: el chat
+responde solo con datos de MongoDB y sin costo.
+
+Con `CHATBOT_PROVIDER=openai` también deben definirse en `.env`
+`NEWS_CHAT_INPUT_USD_PER_MILLION` y `NEWS_CHAT_OUTPUT_USD_PER_MILLION` (precios del modelo), que
+no son secretos. Cada llamada queda registrada en la colección `aiUsage` y el chat deja de usar IA
+al alcanzar el presupuesto de `NEWS_AI_BUDGET_USD` (20 USD por defecto).
+
+Reemplaza a pasar la key por la variable `API_GPT`: no debe ir en `.env`. El assistant solo usa
+`API_GPT` si está definida explícitamente en el entorno (compatibilidad con su uso anterior).
 
 ## Cómo crear `mongodb_uri`
 
