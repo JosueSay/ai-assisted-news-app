@@ -1,4 +1,4 @@
-.PHONY: env-local env-atlas db-check-config db-ping db-test db-init db-schema-check db-seed-catalog db-seed-demo news-db-up news-db-down news-api-up setup-keys
+.PHONY: env-local env-atlas db-check-config db-ping db-test db-init db-schema-check db-seed-catalog db-seed-catalogs db-seed-check db-seed-demo news-db-up news-db-down news-api-up setup-keys
 
 -include .env
 
@@ -92,6 +92,16 @@ db-seed-catalog:
 	@echo "=== Seeding news catalog data ==="
 	$(call ensure_news_db)
 	@$(DOCKER_COMPOSE) --profile tools run --rm news-tools python -m news.seed_catalog
+
+db-seed-catalogs:
+	@echo "=== Seeding news catalogs (locations) ==="
+	$(call ensure_news_db)
+	@$(DOCKER_COMPOSE) --profile tools run --rm news-tools python -m news.seed_catalog
+
+db-seed-check:
+	@echo "=== Checking news catalogs ==="
+	$(call ensure_news_db)
+	@$(DOCKER_COMPOSE) --profile tools run --rm news-tools python -m news.seed_check
 
 db-seed-demo:
 	@echo "=== Seeding local demo news ==="

@@ -138,6 +138,11 @@ erDiagram
 
 - **`locations`**: Único catálogo precargado. Contiene ubicaciones geográficas reales
   (países, regiones, ciudades). Se selecciona durante el onboarding. No cambia por uso.
+  El catálogo inicial trae 16 países a nivel `country`; detalle en
+  [catálogos y seeders](09-catalogos-y-seeders.md).
+- **topics**: Catálogo estático versionado en `backend/news/topics.py`, no es colección
+  MongoDB. Es el vocabulario compartido por `users.onboarding.selectedTopics`,
+  `users.inferredInterests[].topic` y `news.topics`.
 
 ## Datos generados por uso
 

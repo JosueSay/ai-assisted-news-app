@@ -21,7 +21,10 @@ backend/news/
 ├── check_config.py          # Verificación de configuración (CLI)
 ├── ping.py                  # Prueba de conectividad (CLI)
 ├── api.py                   # API HTTP local de noticias
-├── seed_demo.py             # Seeder idempotente de noticias demo locales
+├── seed_catalog.py        # Seeder idempotente del catálogo locations (16 países)
+├── seed_demo.py           # Seeder idempotente de noticias demo locales
+├── topics.py              # Catálogo estático versionado de topics (no es colección)
+├── seed_check.py          # Inspección no destructiva del catálogo locations
 ├── models/
 │   ├── __init__.py          # Enums compartidos
 │   ├── reading_time.py      # Cálculo de tiempo de lectura
@@ -56,7 +59,11 @@ backend/news/
     ├── test_audit_log_model.py      # 6 tests
     ├── test_schema_definitions.py
     ├── test_schema_initialize.py
-    └── test_schema_check.py
+    ├── test_schema_check.py
+    ├── test_topics.py             # catálogo estático de topics
+    ├── test_catalog_data.py       # datos locations contra el modelo Location
+    ├── test_seed_catalog.py       # seeder idempotente por countryCode
+    └── test_seed_check.py         # inspección no destructiva del catálogo
 ```
 
 ## Siete colecciones
@@ -72,6 +79,14 @@ backend/news/
 | `auditLogs` | Persistente | Modelo implementado (Loop 02) |
 
 Loop 03 materializa estas colecciones en MongoDB mediante validators e índices.
+
+Loop 04 agrega los datos base reproducibles: el catálogo `locations` (16 países a
+nivel `country`, identidad natural `countryCode`) se siembra con
+`make db-seed-catalogs` de forma idempotente (solo inserta faltantes, nunca
+modifica ni elimina) y se inspecciona sin escribir con `make db-seed-check`. El
+catálogo de topics es estático y versionado en `topics.py`: no es colección
+MongoDB y los modelos aún no validan contra él de forma cerrada (decisión
+pendiente documentada en `docs/design/database/09-catalogos-y-seeders.md`).
 
 ## Dependencias
 
@@ -153,6 +168,9 @@ make setup-keys        # Prepara archivos de secretos faltantes
 make db-check-config   # Verifica configuración sin exponer secretos
 make db-ping           # Prueba conectividad MongoDB
 make db-init           # Crea colecciones, validators e índices faltantes
+make db-seed-catalog    # Alias: siembra el catálogo locations (idempotente)
+make db-seed-catalogs   # Siembra únicamente catálogos autorizados (idempotente)
+make db-seed-check      # Inspecciona el catálogo sin modificar la base
 make db-seed-demo      # Inserta/actualiza datos ficticios para prueba local
 make db-schema-check   # Verifica drift de colecciones, validators e índices
 make db-test           # Ejecuta tests unitarios dentro de Docker Compose

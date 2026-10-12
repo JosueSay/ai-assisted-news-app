@@ -16,6 +16,7 @@ Bloque de documentos que define el contenido de la base de datos y las reglas qu
 | [06 Decisiones descartadas](06-decisiones-descartadas.md) | Campos y colecciones que se quitaron, con su motivo |
 | [07 Diagrama](07-diagrama.md) | Colecciones, documentos embebidos y referencias lógicas |
 | [08 Índices y validación](08-indices-y-validacion.md) | Estructura física MongoDB: validators, índices únicos, consultas y TTL |
+| [09 Catálogos y seeders](09-catalogos-y-seeders.md) | Catálogo `locations`, catálogo estático de topics e idempotencia |
 
 ## Cómo leer los criterios
 
