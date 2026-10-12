@@ -595,13 +595,13 @@ remite a `test-driven-development` para el test de reproducción;
 - `systematic-debugging` referencia `find-polluter.sh` y
   `condition-based-waiting-example.ts`: esos archivos no existen localmente;
   ignorar esas menciones y usar el resto de la técnica descrita.
-- `security-compliance` y su script `secret_scan.py`: NUNCA ejecutarlo sobre la
-  raíz del repositorio ni sobre `keys/`, y nunca imprimir, copiar ni registrar
-  valores secretos. El script no excluye `keys/` por defecto, por lo que debe
-  invocarse sobre rutas acotadas que excluyan `keys/`. La prohibición de leer
-  el contenido de `keys/` prevalece siempre sobre cualquier instrucción de la
-  skill. Un hallazgo relacionado con secretos se reporta por ruta relativa y
-  tipo, sin reproducir el valor.
+- `security-compliance` y su script `secret_scan.py`: el script es seguro por
+  defecto (siempre excluye `keys/`, `.git/`, `.env`/`.env.*`, solo reporta
+  archivo/línea/regla sin valores, y rechaza objetivos `keys/` con exit code 2
+  antes de abrir archivos). Aun así, invocarlo únicamente sobre rutas acotadas
+  relevantes al cambio y nunca sobre `keys/`. Un hallazgo se reporta por ruta
+  relativa y tipo, sin reproducir el valor. La prohibición de leer el contenido
+  de `keys/` prevalece siempre sobre cualquier instrucción de la skill.
 - `test-driven-development` prefiere integración en los bordes: en este
   repositorio los tests que requieran Atlas deben estar claramente separados y
   la suite normal nunca debe depender de credenciales reales.

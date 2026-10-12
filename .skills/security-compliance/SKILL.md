@@ -20,9 +20,27 @@ Build real security, not checkbox security.
 - Control checklist mapped to the system’s trust boundaries.
 - Evidence list: concrete proofs (configs, logs, tests) with where to find them.
 
-## Optional tool: scan for likely secrets in a repo
+## Secret scan (safe by default)
+
+The bundled scanner never exposes credentials:
+
+- `keys/`, `.git/`, `.env` and `.env.*` are always excluded (no opt-out for `keys/`).
+- Findings report only file, line and rule id — never the matched value.
+  This applies to both stdout and JSON output.
+- An explicit `keys/` or `keys/<file>` target is refused (exit code 2)
+  before any file is opened.
+- Detects possible `mongodb://` / `mongodb+srv://` URIs by rule
+  (`mongodb-uri`), reporting only their existence, never the URI.
+
 ```bash
-python ~/.codex/skills/security-compliance/scripts/secret_scan.py . --json --output /tmp/secrets.json
+python .skills/security-compliance/scripts/secret_scan.py <scoped-path> --json
+```
+
+Run it only on scoped paths relevant to the change under review, never on
+`keys/`. Verify the safe behavior with:
+
+```bash
+python .skills/security-compliance/scripts/test_secret_scan.py
 ```
 
 ## References
