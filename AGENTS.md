@@ -582,19 +582,18 @@ remite a `test-driven-development` para el test de reproducción;
 `code-reviewer` incluye chequeos de seguridad y tests que complementan a
 `security-compliance` y `test-driven-development`.
 
-### Correcciones y guardarraíles conocidos (prevalece AGENTS.md)
+### Adaptaciones locales respecto a la fuente (prevalece AGENTS.md)
 
-- Los SKILL.md de `code-reviewer` y `security-compliance` muestran ejemplos con
-  rutas `~/.codex/skills/...`. En este repositorio deben ejecutarse desde la
-  copia local bajo `.skills/` (p. ej.
-  `python .skills/code-reviewer/scripts/review_diff.py ...`).
-- `systematic-debugging` menciona el namespace `superpowers:` y la skill
-  `verification-before-completion`: no existen en este repositorio.
-  Usar `.skills/test-driven-development` para el test de reproducción y las
-  verificaciones de Git/Testing de este AGENTS.md para la verificación final.
-- `systematic-debugging` referencia `find-polluter.sh` y
-  `condition-based-waiting-example.ts`: esos archivos no existen localmente;
-  ignorar esas menciones y usar el resto de la técnica descrita.
+Las skills se copiaron del catálogo `codex-skills` y se verificaron idénticas
+a la fuente salvo estas adaptaciones locales y el parche seguro de
+`secret_scan.py`:
+
+- Rutas de ejemplo `~/.codex/skills/...` adaptadas a `.skills/...` del repo.
+- Namespace `superpowers:` mapeado a `.skills/`; la skill inexistente
+  `verification-before-completion` se reemplazó por las verificaciones de
+  Git/Testing de este AGENTS.md.
+- Menciones a `find-polluter.sh` y `condition-based-waiting-example.ts`
+  (no incluidos): anotadas con la alternativa local equivalente.
 - `security-compliance` y su script `secret_scan.py`: el script es seguro por
   defecto (siempre excluye `keys/`, `.git/`, `.env`/`.env.*`, solo reporta
   archivo/línea/regla sin valores, y rechaza objetivos `keys/` con exit code 2

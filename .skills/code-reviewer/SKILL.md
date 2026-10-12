@@ -38,7 +38,7 @@ Give reviews that help the author ship safely and quickly.
 ## Optional tool: generate a review report from git diff
 From the repo you’re reviewing:
 ```bash
-python ~/.codex/skills/code-reviewer/scripts/review_diff.py --base origin/main --out /tmp/review.md
+python .skills/code-reviewer/scripts/review_diff.py --base origin/main --out /tmp/review.md
 ```
 
 ## References
