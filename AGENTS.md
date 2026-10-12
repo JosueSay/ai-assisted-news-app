@@ -71,23 +71,32 @@ No implementar salvo que un loop futuro lo autorice explícitamente:
 - servicios financieros;
 - features ajenas a DB.
 
+Excepción autorizada por decisión humana (2026-10-11): ya existen y pueden mantenerse la API
+local de noticias (`backend/news/api.py`), el frontend que la consume y el chat de noticias del
+assistant en modo news (`backend/assistant/news_chat/`) con su pantalla. Ver
+`backend/loops/handoffs/news-chat-integration-result.md`.
+
 ---
 
 ## Separación del assistant existente
 
-`backend/assistant/` corresponde a un asistente existente y NO representa la arquitectura de la aplicación de noticias.
+`backend/assistant/` es el chatbot del equipo. Por decisión humana (2026-10-11) es también el
+chatbot de la aplicación de noticias mediante el **modo news** (`MONGODB_CONTEXT_MODE=news`,
+código en `backend/assistant/news_chat/`).
+
+En modo news:
+
+- lee y escribe únicamente la base `ai_assisted_news`;
+- reutiliza los modelos y la configuración de `backend/news` para cumplir `docs/design/database/`;
+- lee la API key desde `keys/openai_api_key`.
 
 No:
 
-- modificarlo;
-- reutilizar su base de datos `assistant`;
-- reutilizar sus colecciones;
-- reutilizar NOVU;
-- adaptar silenciosamente código financiero para noticias.
+- reutilizar su base de datos `assistant` ni sus colecciones para noticias;
+- reutilizar NOVU ni sus servicios financieros para noticias;
+- romper los modos `projection` y `novu`, que se conservan para el uso original.
 
 La aplicación de noticias debe tener infraestructura MongoDB independiente.
-
-Se puede observar código existente únicamente como referencia técnica cuando sea necesario.
 
 ---
 
@@ -256,7 +265,8 @@ No implementar Firebase Authentication durante los loops de DB salvo instrucció
 
 ## Chat
 
-El chat de noticias es independiente del assistant/NOVU existente.
+El chat de noticias es el assistant en modo news (ver "Separación del assistant existente").
+Es independiente de NOVU y de la base `assistant`.
 
 Las sesiones de chat tendrán una vigencia de:
 
@@ -266,7 +276,9 @@ Las sesiones de chat tendrán una vigencia de:
 
 equivalente a una hora.
 
-La implementación funcional del chatbot no forma parte del alcance actual.
+El chatbot debe cumplir `docs/design/database/04-criterios-de-chat-y-costos.md`: mensajes en
+`chatSessions`, cada llamada real a IA registrada en `aiUsage` y solo noticias `published`
+citadas.
 
 ---
 

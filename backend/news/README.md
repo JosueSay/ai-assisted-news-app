@@ -217,3 +217,10 @@ muestra un estado de error. El frontend no mantiene un dataset local como fallba
   incompatible con el mismo nombre, falla para que se revise manualmente.
 - `db-seed-demo` hace upsert de documentos ficticios de prueba y no elimina colecciones,
   documentos ni índices.
+
+## Chat de noticias
+
+El chat no está en esta API: lo atiende `backend/assistant` en modo news
+(`POST http://localhost:8010/chat`), que lee esta misma base con la configuración `NEWS_*` y los
+modelos de `backend/news/models`. Ver
+[`backend/assistant/README.md`](../assistant/README.md#modo-news).

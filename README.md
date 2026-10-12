@@ -9,7 +9,7 @@ docker compose up --build
 ```
 
 - Frontend Expo/Metro: `http://localhost:8081`
-- Chatbot API: `http://localhost:8010`
+- Chatbot de noticias: `http://localhost:8010`
 - Swagger del chatbot: `http://localhost:8010/docs`
 - MongoDB: `localhost:27017`
 
@@ -24,6 +24,20 @@ telefono fisico, tambien puedes anunciar la IP real de tu computadora:
 
 ```bash
 REACT_NATIVE_PACKAGER_HOSTNAME=192.168.1.50 docker compose up --build frontend
+```
+
+## Chat de noticias
+
+El chat de la app es el servicio `chatbot` (`backend/assistant`) en **modo news**
+(`MONGODB_CONTEXT_MODE=news`): `POST http://localhost:8010/chat` lee las noticias publicadas de
+`ai_assisted_news`, guarda la conversación en `chatSessions` (1 hora) y registra cada llamada a IA
+en `aiUsage`. Con `CHATBOT_PROVIDER=stub` (por defecto) responde solo con datos de la base y sin
+costo. Detalles en [`backend/assistant/README.md`](backend/assistant/README.md#modo-news).
+
+```bash
+make setup-keys && make env-local
+make db-init && make db-seed-catalog && make db-seed-demo
+docker compose up --build
 ```
 
 ## Backend assistant

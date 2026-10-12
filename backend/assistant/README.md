@@ -15,10 +15,13 @@ copia no depende del resto del prototipo original.
 
 ## Ejecutar con Docker
 
-El modo predeterminado de Compose usa `stub`, por lo que permite validar el flujo sin clave ni costo:
+Compose levanta el chatbot en [modo news](#modo-news) con `stub`, por lo que permite validar el
+flujo sin clave ni costo. Necesita la base de noticias inicializada:
 
 ```bash
 cd /ruta/a/ai-assisted-news-app
+make env-local
+make db-init && make db-seed-catalog && make db-seed-demo
 docker compose up --build
 ```
 
@@ -26,19 +29,18 @@ docker compose up --build
 - Swagger: `http://localhost:8010/docs`
 - Salud: `GET http://localhost:8010/health`
 
-Prueba manual con el contexto demo sembrado en MongoDB:
+Prueba manual con las noticias demo:
 
 ```bash
 curl -X POST http://localhost:8010/chat \
   -H 'Content-Type: application/json' \
-  -d '{"message":"¿Qué sabés de mí?","user_id":"demo-user"}'
+  -d '{"message":"Ultimas noticias","user":{"id":"guest:demo","displayName":"Demo"}}'
 ```
 
 Ejecutar la suite dentro del mismo Compose, incluyendo un smoke test HTTP contra el contenedor:
 
 ```bash
-docker compose --profile test up --build \
-  --abort-on-container-exit --exit-code-from tests tests
+make chatbot-test
 ```
 
 Limpiar los servicios y el volumen demo:
@@ -47,12 +49,13 @@ Limpiar los servicios y el volumen demo:
 docker compose down -v
 ```
 
-Para usar OpenAI:
+Para usar OpenAI, guardar la key en `keys/openai_api_key` (nunca en `.env`) y definir en el
+`.env` de la raíz:
 
-```bash
-cp .env.example .env
-# Editar .env y definir API_GPT
-CHATBOT_PROVIDER=openai API_GPT='...' docker compose up --build
+```dotenv
+CHATBOT_PROVIDER=openai
+NEWS_CHAT_INPUT_USD_PER_MILLION=<precio de entrada del modelo>
+NEWS_CHAT_OUTPUT_USD_PER_MILLION=<precio de salida del modelo>
 ```
 
 No se debe agregar `.env` al repositorio.
@@ -84,6 +87,49 @@ sesión autenticada y llamar a este servicio por una red privada o con autentica
 respuesta para poder encadenarla. Si la política de datos exige `store=false`, la alternativa es
 persistir el historial propio en Mongo y enviarlo en cada turno, como hacía el backend integrado de
 NOVU.
+
+## Modo news
+
+Es el modo que usa la aplicación de noticias (`MONGODB_CONTEXT_MODE=news`, activado en el
+`docker-compose.yml` de la raíz). En este modo `/chat` cambia de contrato y cumple
+`docs/design/database/04-criterios-de-chat-y-costos.md`:
+
+```json
+POST /chat
+{
+  "message": "Resume las noticias de Guatemala",
+  "sessionId": null,
+  "newsId": null,
+  "locationId": null,
+  "user": { "id": "guest:<uuid>", "displayName": "Invitado", "email": "" }
+}
+```
+
+- Lee únicamente noticias `published` de la base `ai_assisted_news`, con la misma configuración
+  que `backend/news` (`NEWS_DB_MODE`, `NEWS_MONGODB_*`; en Atlas la URI sale de
+  `keys/mongodb_uri`). Reutiliza los modelos de `backend/news/models` para escribir documentos
+  válidos según los validators.
+- La conversación se guarda embebida en `chatSessions` con `expiresAt = createdAt + 3600 s`; el
+  historial se envía al modelo en cada turno con `store=false`, en lugar de `previous_response_id`.
+- La intención (`recent_news`, `regional_news`, `topic_news`, `news_detail`, `summarize`,
+  `explain`, `unsupported`) se clasifica con reglas, sin IA (`news_chat/intent.py`).
+- Con `CHATBOT_PROVIDER=openai` responde con el modelo (`strategy = "llm"`) usando las noticias
+  como contexto autorizado y registra cada llamada en `aiUsage`. Requiere `keys/openai_api_key`,
+  `NEWS_CHAT_INPUT_USD_PER_MILLION` y `NEWS_CHAT_OUTPUT_USD_PER_MILLION`.
+- Con `stub`, sin presupuesto (`NEWS_AI_BUDGET_USD`, 20 por defecto) o si OpenAI falla, responde
+  con los campos de las noticias (`strategy = "database_query"`) y no consume presupuesto.
+  Peticiones fuera del dominio: `strategy = "template"`, sin IA.
+- `confidence`: `low` si no hay noticias o alguna no está `confirmed`; `high` si todas están
+  confirmadas y cada una tiene dos o más fuentes, o una `official`/`primary_source`; `medium`
+  en el resto.
+- `user.id` es un identificador provisional `<proveedor>:<id>` que se guarda en
+  `users.firebaseUid` hasta que exista Firebase Authentication. **No está autenticado.**
+
+Variables propias del modo: `CHAT_SESSION_TTL_SECONDS`, `NEWS_AI_BUDGET_USD`,
+`NEWS_CHAT_INPUT_USD_PER_MILLION`, `NEWS_CHAT_OUTPUT_USD_PER_MILLION`,
+`NEWS_CHAT_DEFAULT_LOCATION_CODE` y `OPENAI_API_KEY_FILE`. El prompt es `prompts/news.md`.
+
+Los modos `projection` y `novu` se conservan sin cambios para el uso original del asistente.
 
 ## Ejecución local sin Docker
 
@@ -140,6 +186,8 @@ assistant/
 ├── config.py                # variables de entorno
 ├── prompts.py               # carga del prompt externo
 ├── prompts/system.md        # prompt editable
+├── prompts/news.md          # prompt del modo news
+├── news_chat/               # modo news: intención, noticias, sesiones y aiUsage
 ├── providers/               # OpenAI y stub
 ├── repositories/            # MongoDB o contexto vacío
 ├── service.py               # orquestación del turno
