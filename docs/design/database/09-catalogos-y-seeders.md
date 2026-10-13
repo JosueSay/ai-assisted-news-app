@@ -103,12 +103,13 @@ make db-seed-check      # inspección no destructiva del catálogo
 
 `db-seed-catalog` (singular) se conserva como alias del comando plural.
 
-## Seed vs futuro reseed
+## Seed vs reseed controlado
 
-Seed inserta únicamente lo faltante y preserva todo lo existente. Un futuro
-reseed destructivo (borrar y recrear) no existe todavía: requeriría autorización
-humana explícita según los guardarraíles del proyecto y no forma parte de este
-diseño.
+Seed inserta únicamente lo faltante y preserva todo lo existente. La reconstrucción
+controlada del dataset (borrar y recrear solo las 16 locations y 32 news demo verificadas
+por ownership) existe como `make db-reseed` con confirmación exacta y está documentada en
+[automatización y reseed](11-automatizacion-y-reseed.md); requiere autorización humana
+explícita según los guardarraíles del proyecto.
 
 ## Decisión pendiente
 

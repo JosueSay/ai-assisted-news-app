@@ -19,6 +19,7 @@ Bloque de documentos que define el contenido de la base de datos y las reglas qu
 | [09 Catálogos y seeders](09-catalogos-y-seeders.md) | Catálogo `locations`, catálogo estático de topics e idempotencia |
 | [10 Generador de noticias demo](10-generador-noticias-demo.md) | Dataset sintético de 32 noticias, determinismo e idempotencia |
 | [11 Automatización y reseed](11-automatizacion-y-reseed.md) | Bootstrap, verify, ownership, dry-run, confirmación y reseed seguro |
+| [12 Verificación final](12-verificacion-final.md) | Cierre, reproducibilidad y entrada para nuevos desarrolladores |
 
 ## Cómo leer los criterios
 

@@ -21,6 +21,7 @@ backend/news/
 ├── check_config.py          # Verificación de configuración (CLI)
 ├── ping.py                  # Prueba de conectividad (CLI)
 ├── api.py                   # API HTTP local de noticias
+├── auth.py                  # Autenticación admin local (preexistente, fuera del alcance DB)
 ├── seed_catalog.py        # Seeder idempotente del catálogo locations (16 países)
 ├── seed_demo.py           # Seeder idempotente de noticias demo locales
 ├── demo_news.py           # Generador determinista de 32 noticias demo (Loop 05)
@@ -76,7 +77,10 @@ backend/news/
     ├── test_news_check.py         # inspección no destructiva del dataset demo
     ├── test_reseed.py             # reseed seguro: confirmación, ownership, dry-run, orden, preservación, fallos (Loop 06)
     ├── test_bootstrap.py          # bootstrap idempotente sin deletes (Loop 06)
-    └── test_verify.py             # verificación solo-lectura y sus drifts (Loop 06)
+    ├── test_verify.py             # verificación solo-lectura y sus drifts (Loop 06)
+    ├── test_api.py                # adaptación de documentos MongoDB a la API (preexistente)
+    ├── test_auth.py               # autenticación admin local offline (preexistente)
+    └── test_seed_demo.py          # seeder demo legacy con upsert (preexistente, previo al Loop 05)
 ```
 
 ## Siete colecciones

@@ -112,11 +112,13 @@ make db-news-check      # inspección no destructiva del dataset
 make db-schema-check    # verifica que el esquema físico no derivó
 ```
 
-## Seed vs futuro reseed
+## Seed vs reseed controlado
 
 Seed inserta únicamente lo faltante y preserva todo lo existente, incluidos
-documentos ajenos. Un futuro reseed destructivo no existe todavía y requeriría
-autorización humana explícita.
+documentos ajenos. La reconstrucción controlada del dataset existe como
+`make db-reseed` con confirmación exacta y está documentada en
+[automatización y reseed](11-automatizacion-y-reseed.md); requiere autorización
+humana explícita.
 
 ## Limitaciones conocidas
 
