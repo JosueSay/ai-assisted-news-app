@@ -143,6 +143,11 @@ erDiagram
 - **topics**: Catálogo estático versionado en `backend/news/topics.py`, no es colección
   MongoDB. Es el vocabulario compartido por `users.onboarding.selectedTopics`,
   `users.inferredInterests[].topic` y `news.topics`.
+- **dataset demo**: 32 noticias sintéticas (2 por país, nivel `country`),
+  generadas por `backend/news/demo_news.py`; detalle en
+  [generador de noticias demo](10-generador-noticias-demo.md). No agrega
+  colecciones ni cambia referencias: `authorId` usa un identificador sintético
+  determinista pendiente de correspondencia con un `users` real.
 
 ## Datos generados por uso
 

@@ -23,6 +23,9 @@ backend/news/
 ├── api.py                   # API HTTP local de noticias
 ├── seed_catalog.py        # Seeder idempotente del catálogo locations (16 países)
 ├── seed_demo.py           # Seeder idempotente de noticias demo locales
+├── demo_news.py           # Generador determinista de 32 noticias demo (Loop 05)
+├── seed_news.py           # Seeder idempotente de noticias demo por slug (Loop 05)
+├── news_check.py          # Inspección no destructiva del dataset demo (Loop 05)
 ├── topics.py              # Catálogo estático versionado de topics (no es colección)
 ├── seed_check.py          # Inspección no destructiva del catálogo locations
 ├── models/
@@ -63,7 +66,10 @@ backend/news/
     ├── test_topics.py             # catálogo estático de topics
     ├── test_catalog_data.py       # datos locations contra el modelo Location
     ├── test_seed_catalog.py       # seeder idempotente por countryCode
-    └── test_seed_check.py         # inspección no destructiva del catálogo
+    ├── test_seed_check.py         # inspección no destructiva del catálogo
+    ├── test_demo_news.py          # generador determinista de 32 noticias demo
+    ├── test_seed_news.py          # seeder idempotente por slug (solo news)
+    └── test_news_check.py         # inspección no destructiva del dataset demo
 ```
 
 ## Siete colecciones
@@ -84,9 +90,19 @@ Loop 04 agrega los datos base reproducibles: el catálogo `locations` (16 paíse
 nivel `country`, identidad natural `countryCode`) se siembra con
 `make db-seed-catalogs` de forma idempotente (solo inserta faltantes, nunca
 modifica ni elimina) y se inspecciona sin escribir con `make db-seed-check`. El
-catálogo de topics es estático y versionado en `topics.py`: no es colección
-MongoDB y los modelos aún no validan contra él de forma cerrada (decisión
-pendiente documentada en `docs/design/database/09-catalogos-y-seeders.md`).
+ catálogo de topics es estático y versionado en `topics.py`: no es colección
+ MongoDB y los modelos aún no validan contra él de forma cerrada (decisión
+ pendiente documentada en `docs/design/database/09-catalogos-y-seeders.md`).
+
+ Loop 05 agrega el dataset reproducible de noticias demo: `demo_news.py`
+ genera exactamente 32 noticias sintéticas (DEMO / SYNTHETIC DATA, 2 por país
+ a nivel `country`, 28 `published` / 4 `draft`, 4 verification statuses, 14
+ topics cubiertos, tiempos de lectura coherentes) de forma determinista y sin
+ MongoDB; `make db-seed-news` las persiste de forma idempotente por `slug`
+ (solo escribe en `news`, nunca crea users: `authorId` es un identificador
+ sintético documentado pendiente de correspondencia real) y
+ `make db-news-check` inspecciona el dataset sin modificarlo. Detalle en
+ `docs/design/database/10-generador-noticias-demo.md`.
 
 ## Dependencias
 
@@ -172,6 +188,8 @@ make db-seed-catalog    # Alias: siembra el catálogo locations (idempotente)
 make db-seed-catalogs   # Siembra únicamente catálogos autorizados (idempotente)
 make db-seed-check      # Inspecciona el catálogo sin modificar la base
 make db-seed-demo      # Inserta/actualiza datos ficticios para prueba local
+make db-seed-news      # Siembra el dataset demo de 32 noticias (idempotente, solo news)
+make db-news-check      # Inspecciona el dataset demo sin modificar la base
 make db-schema-check   # Verifica drift de colecciones, validators e índices
 make db-test           # Ejecuta tests unitarios dentro de Docker Compose
 make news-db-up        # Levanta solo el MongoDB local de noticias
@@ -235,3 +253,5 @@ muestra un estado de error. El frontend no mantiene un dataset local como fallba
   incompatible con el mismo nombre, falla para que se revise manualmente.
 - `db-seed-demo` hace upsert de documentos ficticios de prueba y no elimina colecciones,
   documentos ni índices.
+- `db-seed-news` solo inserta noticias demo faltantes por `slug` en `news`: nunca
+  modifica ni elimina documentos, nunca escribe en otras colecciones y nunca crea users.
