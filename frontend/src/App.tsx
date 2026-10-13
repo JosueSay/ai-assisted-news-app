@@ -10,6 +10,7 @@ import {
   Roboto_700Bold,
 } from "@expo-google-fonts/roboto";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { LoginScreen } from "./features/auth/LoginScreen";
 import { NewsFeedScreen } from "./features/news/NewsFeedScreen";
@@ -39,15 +40,17 @@ export default function App() {
 
   if (!fontsLoaded || (isLoading && !user)) {
     return (
-      <View style={styles.splash}>
-        <StatusBar style="dark" />
-        <ActivityIndicator color={colors.action} />
-      </View>
+      <SafeAreaProvider>
+        <View style={styles.splash}>
+          <StatusBar style="dark" />
+          <ActivityIndicator color={colors.action} />
+        </View>
+      </SafeAreaProvider>
     );
   }
 
   return (
-    <>
+    <SafeAreaProvider>
       <StatusBar style="dark" />
       {user ? (
         <NewsFeedScreen user={user} onSignOut={() => void signOut()} />
@@ -62,7 +65,7 @@ export default function App() {
           onSignInAsAdmin={(username, password) => signInAsAdmin(username, password)}
         />
       )}
-    </>
+    </SafeAreaProvider>
   );
 }
 
