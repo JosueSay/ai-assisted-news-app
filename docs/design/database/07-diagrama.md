@@ -148,6 +148,10 @@ erDiagram
   [generador de noticias demo](10-generador-noticias-demo.md). No agrega
   colecciones ni cambia referencias: `authorId` usa un identificador sintético
   determinista pendiente de correspondencia con un `users` real.
+- **nota operativa**: el reseed ([automatización y reseed](11-automatizacion-y-reseed.md))
+  no agrega colecciones; elimina `news` antes que `locations` y reconstruye
+  `locations` antes que `news`, preservando documentos externos y las otras
+  cinco colecciones.
 
 ## Datos generados por uso
 

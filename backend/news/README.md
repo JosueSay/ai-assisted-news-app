@@ -26,6 +26,10 @@ backend/news/
 ├── demo_news.py           # Generador determinista de 32 noticias demo (Loop 05)
 ├── seed_news.py           # Seeder idempotente de noticias demo por slug (Loop 05)
 ├── news_check.py          # Inspección no destructiva del dataset demo (Loop 05)
+├── reseed.py              # Reseed seguro del dataset controlado: ownership, preflight, deletes por _id, confirmación (Loop 06)
+├── reseed_dry_run.py      # CLI no destructivo del plan de reseed (Loop 06)
+├── bootstrap.py           # Bootstrap idempotente: init + seeds + checks, sin deletes (Loop 06)
+├── verify.py              # Verificación integral solo-lectura: schema + catálogos + demo news (Loop 06)
 ├── topics.py              # Catálogo estático versionado de topics (no es colección)
 ├── seed_check.py          # Inspección no destructiva del catálogo locations
 ├── models/
@@ -69,7 +73,10 @@ backend/news/
     ├── test_seed_check.py         # inspección no destructiva del catálogo
     ├── test_demo_news.py          # generador determinista de 32 noticias demo
     ├── test_seed_news.py          # seeder idempotente por slug (solo news)
-    └── test_news_check.py         # inspección no destructiva del dataset demo
+    ├── test_news_check.py         # inspección no destructiva del dataset demo
+    ├── test_reseed.py             # reseed seguro: confirmación, ownership, dry-run, orden, preservación, fallos (Loop 06)
+    ├── test_bootstrap.py          # bootstrap idempotente sin deletes (Loop 06)
+    └── test_verify.py             # verificación solo-lectura y sus drifts (Loop 06)
 ```
 
 ## Siete colecciones
@@ -191,6 +198,10 @@ make db-seed-demo      # Inserta/actualiza datos ficticios para prueba local
 make db-seed-news      # Siembra el dataset demo de 32 noticias (idempotente, solo news)
 make db-news-check      # Inspecciona el dataset demo sin modificar la base
 make db-schema-check   # Verifica drift de colecciones, validators e índices
+make db-bootstrap      # Init + catálogos + demo news + checks (idempotente, sin confirmación)
+make db-verify         # Verificación integral solo-lectura (schema + catálogos + demo news)
+make db-reseed-dry-run # Plan real de reseed sin escribir nada
+make db-reseed CONFIRM="RESEED ai_assisted_news"  # Reseed controlado (local; en Atlas la frase es RESEED ATLAS <db>)
 make db-test           # Ejecuta tests unitarios dentro de Docker Compose
 make news-db-up        # Levanta solo el MongoDB local de noticias
 make news-db-down      # Detiene solo el MongoDB local de noticias
@@ -255,3 +266,13 @@ muestra un estado de error. El frontend no mantiene un dataset local como fallba
   documentos ni índices.
 - `db-seed-news` solo inserta noticias demo faltantes por `slug` en `news`: nunca
   modifica ni elimina documentos, nunca escribe en otras colecciones y nunca crea users.
+- `db-bootstrap` y `db-verify` nunca eliminan: el primero solo asegura schema e inserta
+  faltantes, el segundo solo lee.
+- `db-reseed-dry-run` nunca escribe: solo inspecciona y reporta el plan.
+- `db-reseed` elimina únicamente documentos controlados verificados por ownership
+  (`countryCode`+`_id` determinista, `slug`+`_id` determinista) mediante
+  `delete_many({"_id": {"$in": [...]}})`; nunca `delete_many({})`, nunca filtros
+  amplios, nunca `drop`. Requiere `CONFIRM` con la frase exacta del modo
+  (`RESEED <db>` en local, `RESEED ATLAS <db>` en Atlas); sin ella aborta sin
+  modificar nada. No existe `--force`. Detalle en
+  `docs/design/database/11-automatizacion-y-reseed.md`.

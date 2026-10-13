@@ -18,6 +18,7 @@ Bloque de documentos que define el contenido de la base de datos y las reglas qu
 | [08 Índices y validación](08-indices-y-validacion.md) | Estructura física MongoDB: validators, índices únicos, consultas y TTL |
 | [09 Catálogos y seeders](09-catalogos-y-seeders.md) | Catálogo `locations`, catálogo estático de topics e idempotencia |
 | [10 Generador de noticias demo](10-generador-noticias-demo.md) | Dataset sintético de 32 noticias, determinismo e idempotencia |
+| [11 Automatización y reseed](11-automatizacion-y-reseed.md) | Bootstrap, verify, ownership, dry-run, confirmación y reseed seguro |
 
 ## Cómo leer los criterios
 
