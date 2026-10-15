@@ -1,4 +1,4 @@
-.PHONY: env-local env-atlas db-check-config db-ping db-test db-init db-schema-check db-seed-catalog db-seed-demo news-db-up news-db-down news-api-up chatbot-up chatbot-test setup-keys
+.PHONY: env-local env-atlas db-check-config db-ping db-test db-init db-schema-check db-seed-catalog db-seed-catalogs db-seed-check db-seed-demo db-seed-news db-news-check db-bootstrap db-verify db-reseed-dry-run db-reseed news-db-up news-db-down news-api-up setup-keys
 
 -include .env
 
@@ -96,10 +96,54 @@ db-seed-catalog:
 	$(call ensure_news_db)
 	@$(DOCKER_COMPOSE) --profile tools run --rm news-tools python -m news.seed_catalog
 
+db-seed-catalogs:
+	@echo "=== Seeding news catalogs (locations) ==="
+	$(call ensure_news_db)
+	@$(DOCKER_COMPOSE) --profile tools run --rm news-tools python -m news.seed_catalog
+
+db-seed-check:
+	@echo "=== Checking news catalogs ==="
+	$(call ensure_news_db)
+	@$(DOCKER_COMPOSE) --profile tools run --rm news-tools python -m news.seed_check
+
 db-seed-demo:
 	@echo "=== Seeding local demo news ==="
 	$(call ensure_news_db)
 	@$(DOCKER_COMPOSE) --profile tools run --rm news-tools python -m news.seed_demo
+
+db-seed-news:
+	@echo "=== Seeding demo news dataset (Loop 05) ==="
+	$(call ensure_news_db)
+	@$(DOCKER_COMPOSE) --profile tools run --rm news-tools python -m news.seed_news
+
+db-news-check:
+	@echo "=== Checking demo news dataset ==="
+	$(call ensure_news_db)
+	@$(DOCKER_COMPOSE) --profile tools run --rm news-tools python -m news.news_check
+
+db-bootstrap:
+	@echo "=== Bootstrapping news DB (init + catalogs + demo news + checks) ==="
+	$(call ensure_news_db)
+	@$(DOCKER_COMPOSE) --profile tools run --rm news-tools python -m news.bootstrap
+
+db-verify:
+	@echo "=== Verifying news DB (schema + catalogs + demo news) ==="
+	$(call ensure_news_db)
+	@$(DOCKER_COMPOSE) --profile tools run --rm news-tools python -m news.verify
+
+db-reseed-dry-run:
+	@echo "=== Reseed dry run (no changes will be performed) ==="
+	$(call ensure_news_db)
+	@$(DOCKER_COMPOSE) --profile tools run --rm news-tools python -m news.reseed_dry_run
+
+db-reseed:
+	@echo "=== Reseeding controlled news DB dataset ==="
+	@echo "This deletes ONLY the 16 controlled locations and 32 demo news,"
+	@echo "then rebuilds them. It requires CONFIRM=\"<exact phrase>\"."
+	@echo "Local: CONFIRM=\"RESEED $(NEWS_MONGODB_DATABASE)\"."
+	@echo "Atlas: CONFIRM=\"RESEED ATLAS $(NEWS_MONGODB_DATABASE)\"."
+	$(call ensure_news_db)
+	@$(DOCKER_COMPOSE) --profile tools run --rm -e CONFIRM="$(CONFIRM)" news-tools python -m news.reseed
 
 news-db-up:
 	@$(DOCKER_COMPOSE) --profile news-local up -d news-mongo

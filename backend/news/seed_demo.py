@@ -200,7 +200,7 @@ def seed_demo_data(database: Database) -> DemoSeedResult:
     result = DemoSeedResult(database=database.name)
 
     catalog_result = seed_catalog_data(database)
-    result.locations_upserted = catalog_result.locations_upserted
+    result.locations_upserted = catalog_result.inserted
 
     user_result = database["users"].replace_one(
         {"_id": DEMO_AUTHOR_ID},

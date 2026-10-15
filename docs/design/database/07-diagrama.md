@@ -138,6 +138,20 @@ erDiagram
 
 - **`locations`**: Único catálogo precargado. Contiene ubicaciones geográficas reales
   (países, regiones, ciudades). Se selecciona durante el onboarding. No cambia por uso.
+  El catálogo inicial trae 16 países a nivel `country`; detalle en
+  [catálogos y seeders](09-catalogos-y-seeders.md).
+- **topics**: Catálogo estático versionado en `backend/news/topics.py`, no es colección
+  MongoDB. Es el vocabulario compartido por `users.onboarding.selectedTopics`,
+  `users.inferredInterests[].topic` y `news.topics`.
+- **dataset demo**: 32 noticias sintéticas (2 por país, nivel `country`),
+  generadas por `backend/news/demo_news.py`; detalle en
+  [generador de noticias demo](10-generador-noticias-demo.md). No agrega
+  colecciones ni cambia referencias: `authorId` usa un identificador sintético
+  determinista pendiente de correspondencia con un `users` real.
+- **nota operativa**: el reseed ([automatización y reseed](11-automatizacion-y-reseed.md))
+  no agrega colecciones; elimina `news` antes que `locations` y reconstruye
+  `locations` antes que `news`, preservando documentos externos y las otras
+  cinco colecciones.
 
 ## Datos generados por uso
 

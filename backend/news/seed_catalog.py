@@ -58,8 +58,8 @@ CATALOG_LOCATIONS = [
 @dataclass
 class CatalogSeedResult:
     database: str
-    locations_upserted: int = 0
-    locations_modified: int = 0
+    inserted: int = 0
+    unchanged: int = 0
 
     def format(self) -> str:
         return "\n".join(
@@ -67,13 +67,14 @@ class CatalogSeedResult:
                 "=== AI Assisted News — Catalog Seed ===",
                 f"Database: {self.database}",
                 "Operation:",
-                "- upsert controlled locations catalog",
+                "- insert missing controlled locations catalog",
                 "",
                 "No collections, documents or indexes will be dropped.",
+                "Existing documents are never modified nor deleted.",
                 "",
                 f"Locations expected: {len(CATALOG_LOCATIONS)}",
-                f"Locations upserted: {self.locations_upserted}",
-                f"Locations modified: {self.locations_modified}",
+                f"Locations inserted: {self.inserted}",
+                f"Locations unchanged: {self.unchanged}",
             ]
         )
 
@@ -98,16 +99,12 @@ def seed_catalog_data(database: Database) -> CatalogSeedResult:
     result = CatalogSeedResult(database=database.name)
 
     for item in CATALOG_LOCATIONS:
-        document = catalog_location_document(item)
-        upsert_result = database["locations"].replace_one(
-            {"_id": document["_id"]},
-            document,
-            upsert=True,
-        )
-        if upsert_result.upserted_id:
-            result.locations_upserted += 1
-        else:
-            result.locations_modified += upsert_result.modified_count
+        existing = database["locations"].find_one({"countryCode": item["code"]})
+        if existing is not None:
+            result.unchanged += 1
+            continue
+        database["locations"].insert_one(catalog_location_document(item))
+        result.inserted += 1
 
     return result
 
