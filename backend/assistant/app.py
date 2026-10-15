@@ -4,9 +4,13 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pymongo.errors import PyMongoError
 
 from .config import ChatbotConfigurationError, api_key_is_configured, get_settings
 from .models import ChatRequest, ChatResponse, HealthResponse
+from .news_chat import schemas as news_schemas
+from .news_chat.database import open_news_client
+from .news_chat.service import NewsChatRequestError, NewsChatService
 from .providers.openai import OpenAIChatProvider
 from .providers.stub import StubChatProvider
 from .repositories.base import EmptyContextRepository
@@ -20,22 +24,74 @@ def _build_provider(settings):
     return OpenAIChatProvider(settings)
 
 
+class _UnavailableProvider:
+    """Difiere el error de configuración al turno para que FastAPI valide antes el cuerpo."""
+
+    def __init__(self, error: ChatbotConfigurationError) -> None:
+        self._error = error
+
+    async def generate(self, **_options):
+        raise self._error
+
+
+def _provider_or_unavailable(settings):
+    try:
+        return _build_provider(settings)
+    except ChatbotConfigurationError as error:
+        return _UnavailableProvider(error)
+
+
 async def get_chat_service(request: Request) -> ChatService:
     settings = get_settings()
-    return ChatService(settings, _build_provider(settings), request.app.state.context_repository)
+    return ChatService(
+        settings, _provider_or_unavailable(settings), request.app.state.context_repository
+    )
 
 
 ChatServiceDependency = Annotated[ChatService, Depends(get_chat_service)]
 
 
+async def get_news_chat_service(request: Request) -> NewsChatService:
+    settings = get_settings()
+    return NewsChatService(
+        settings,
+        lambda: _build_provider(settings),
+        request.app.state.news_database,
+    )
+
+
+NewsChatServiceDependency = Annotated[NewsChatService, Depends(get_news_chat_service)]
+
+
+class NewsDatabaseRepository:
+    """Ciclo de vida de la conexión a ai_assisted_news en modo news."""
+
+    def __init__(self) -> None:
+        self.connected = False
+        self._client, database_name = open_news_client()
+        self.database = self._client[database_name]
+
+    async def connect(self) -> None:
+        await self.database.command("ping")
+        self.connected = True
+
+    async def close(self) -> None:
+        await self._client.close()
+        self.connected = False
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     settings = get_settings()
-    repository = (
-        MongoContextRepository(settings)
-        if settings.mongodb_configured
-        else EmptyContextRepository()
-    )
+    if settings.news_mode:
+        repository = NewsDatabaseRepository()
+        application.state.news_database = repository.database
+    else:
+        repository = (
+            MongoContextRepository(settings)
+            if settings.mongodb_configured
+            else EmptyContextRepository()
+        )
     application.state.context_repository = repository
     application.state.mongodb_error = None
     try:
@@ -83,6 +139,25 @@ def create_app() -> FastAPI:
             mongodb_connected=mongo_connected,
             prompt_version=current_settings.prompt_version,
         )
+
+    if settings.news_mode:
+
+        @application.post("/chat", response_model=news_schemas.ChatReply)
+        async def news_chat(
+            chat_request: news_schemas.ChatRequest, service: NewsChatServiceDependency
+        ) -> news_schemas.ChatReply:
+            try:
+                return await service.reply(chat_request)
+            except ChatbotConfigurationError as error:
+                raise HTTPException(status_code=503, detail=str(error)) from error
+            except NewsChatRequestError as error:
+                raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+            except PyMongoError as error:
+                raise HTTPException(
+                    status_code=503, detail="No fue posible leer la base de noticias."
+                ) from error
+
+        return application
 
     @application.post("/chat", response_model=ChatResponse)
     async def chat(chat_request: ChatRequest, service: ChatServiceDependency) -> ChatResponse:

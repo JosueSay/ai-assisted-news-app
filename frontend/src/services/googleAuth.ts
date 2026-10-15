@@ -3,6 +3,7 @@ import { Platform } from "react-native";
 import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Crypto from "expo-crypto";
 
 import { loginAdmin } from "./newsService";
 import type { AppUser } from "../types";
@@ -119,7 +120,8 @@ export function useGoogleAuth() {
   const signInAsGuest = useCallback(async () => {
     setError(null);
     await persistUser({
-      id: "guest",
+      // Id propio por dispositivo para que cada invitado tenga su usuario y sus sesiones de chat.
+      id: Crypto.randomUUID(),
       name: "Invitado",
       email: "invitado@local.news",
       isGuest: true,

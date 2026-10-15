@@ -1,0 +1,8 @@
+# Se aplica cuando el contexto de build es backend/ con assistant/Dockerfile.
+**/.env
+**/.git
+**/.pytest_cache
+**/.ruff_cache
+**/.venv
+**/__pycache__
+**/*.py[cod]

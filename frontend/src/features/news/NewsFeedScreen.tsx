@@ -21,6 +21,7 @@ import {
   FilePlus,
   Home,
   LogOut,
+  MessageCircle,
   Search,
   X,
 } from "lucide-react-native";
@@ -28,6 +29,7 @@ import {
 import { ArticleCard } from "../../components/ArticleCard";
 import { ArticleImage } from "../../components/ArticleImage";
 import { AppButton } from "../../components/AppButton";
+import { ChatScreen } from "../chat/ChatScreen";
 import {
   CATEGORIES,
   getCategoryLabel,
@@ -59,6 +61,7 @@ type NewsRoute =
   | { name: "home" }
   | { name: "saved" }
   | { name: "adminCreate" }
+  | { name: "chat"; slug?: string }
   | { name: "category"; category: CategoryId }
   | { name: "article"; slug: string };
 
@@ -96,6 +99,8 @@ function serializeRoute(route: NewsRoute) {
       return "#/guardados";
     case "adminCreate":
       return "#/admin/nueva";
+    case "chat":
+      return route.slug ? `#/asistente/${route.slug}` : "#/asistente";
     case "category":
       return `#/seccion/${route.category}`;
     case "article":
@@ -110,6 +115,10 @@ function parseRouteFromHash(hash: string): NewsRoute {
   if (cleanHash === "guardados") return { name: "saved" };
   if (cleanHash === "admin" || cleanHash === "admin/nueva") return { name: "adminCreate" };
   if (cleanHash.startsWith("buscar")) return { name: "home" };
+  if (cleanHash === "asistente") return { name: "chat" };
+  if (cleanHash.startsWith("asistente/")) {
+    return { name: "chat", slug: cleanHash.replace("asistente/", "") };
+  }
   if (cleanHash.startsWith("seccion/")) {
     const category = cleanHash.replace("seccion/", "");
     return isCategoryId(category) ? { name: "category", category } : { name: "home" };
@@ -141,6 +150,7 @@ function routeTitle(route: NewsRoute, article: NewsArticle | null) {
   if (route.name === "category") return getCategoryLabel(route.category);
   if (route.name === "saved") return "Guardados";
   if (route.name === "adminCreate") return "Nueva noticia";
+  if (route.name === "chat") return "Asistente";
   return "Inicio";
 }
 
@@ -966,6 +976,13 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
             </Text>
           </Pressable>
 
+          <AppButton
+            label="Preguntar al asistente"
+            variant="secondary"
+            onPress={() => navigate({ name: "chat", slug: currentArticle.slug })}
+            icon={<MessageCircle size={18} color={colors.action} />}
+          />
+
           <View style={styles.readerBody}>
             {currentArticle.body.map((paragraph) => (
               <Text key={paragraph} style={styles.paragraph}>
@@ -987,13 +1004,29 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
     if (isFeedLoading) return renderLoading();
     if (route.name === "adminCreate") return renderAdminCreate();
     if (route.name === "saved") return renderSaved();
+    if (route.name === "chat") {
+      return (
+        <ChatScreen
+          user={user}
+          contextArticle={route.slug ? getArticleBySlug(route.slug, articles) : null}
+          onClearContext={() => navigate({ name: "chat" }, true)}
+          onOpenArticle={(slug) => navigate({ name: "article", slug })}
+        />
+      );
+    }
     if (route.name === "category") return renderCategory(route.category);
     if (route.name === "article") return renderArticle();
     return renderHome();
   };
 
   const activeBottom =
-    route.name === "adminCreate" ? "admin" : route.name === "saved" ? "saved" : "home";
+    route.name === "adminCreate"
+      ? "admin"
+      : route.name === "saved"
+        ? "saved"
+        : route.name === "chat"
+          ? "chat"
+          : "home";
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -1014,6 +1047,12 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
               label={`Guardados (${savedIds.length})`}
               variant="ghost"
               onPress={() => navigate({ name: "saved" })}
+            />
+            <AppButton
+              label="Asistente"
+              variant="ghost"
+              onPress={() => navigate({ name: "chat" })}
+              icon={<MessageCircle size={18} color={colors.action} />}
             />
             {isAdmin ? (
               <AppButton
@@ -1071,6 +1110,17 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
               />
             }
             onPress={() => navigate({ name: "saved" })}
+          />
+          <BottomNavItem
+            label="Asistente"
+            active={activeBottom === "chat"}
+            icon={
+              <MessageCircle
+                size={20}
+                color={activeBottom === "chat" ? colors.action : colors.textSecondary}
+              />
+            }
+            onPress={() => navigate({ name: "chat" })}
           />
           {isAdmin ? (
             <BottomNavItem

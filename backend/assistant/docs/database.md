@@ -170,3 +170,20 @@ Esquema mínimo sugerido:
 
 Índices: `{user_id: 1, last_message_at: -1}` y
 `{conversation_id: 1, created_at: -1, _id: -1}`.
+
+## Modo news
+
+Para la aplicación de noticias el asistente no usa la base `assistant`: con
+`MONGODB_CONTEXT_MODE=news` lee y escribe `ai_assisted_news` siguiendo
+`docs/design/database/`.
+
+| Colección | Operación | Uso |
+| --- | --- | --- |
+| `locations` | Lectura | Ubicación simulada del usuario y filtros por país |
+| `news` | Lectura (`status = "published"`) | Contexto de las respuestas y `citedNewsIds` |
+| `users` | Alta y actualización | Usuario provisional (`firebaseUid`) y ubicación simulada |
+| `chatSessions` | Alta y `$push` de mensajes | Conversación con TTL de 1 hora |
+| `aiUsage` | Alta y suma | Costo de cada llamada real a IA y control del presupuesto |
+
+El historial se guarda en `chatSessions` y se envía al modelo en cada turno con `store=false`,
+por lo que no depende de `previous_response_id`. Ver [`../README.md`](../README.md#modo-news).

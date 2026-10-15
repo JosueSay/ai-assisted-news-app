@@ -35,7 +35,10 @@ define write_common_env
 		'EXPO_PUBLIC_NEWS_API_BASE_URL=http://localhost:8020' \
 		'NEWS_ADMIN_USERNAME=admin' \
 		'NEWS_ADMIN_PASSWORD_FILE=keys/news_admin_password' \
-		'NEWS_ADMIN_TOKEN_TTL_SECONDS=3600'
+		'NEWS_ADMIN_TOKEN_TTL_SECONDS=3600' \
+		'CHATBOT_PROVIDER=stub' \
+		'CHAT_SESSION_TTL_SECONDS=3600' \
+		'EXPO_PUBLIC_ASSISTANT_API_BASE_URL=http://localhost:8010'
 endef
 
 env-local:
@@ -152,10 +155,19 @@ news-api-up:
 	$(call ensure_news_db)
 	@$(DOCKER_COMPOSE) up -d news-api
 
+chatbot-up:
+	$(call ensure_news_db)
+	@$(DOCKER_COMPOSE) up -d --build chatbot
+
+chatbot-test:
+	@echo "=== Running assistant tests (incluye smoke test contra el chatbot) ==="
+	$(call ensure_news_db)
+	@$(DOCKER_COMPOSE) --profile test run --rm --build tests
+
 setup-keys:
 	@echo "=== Setting up secret files ==="
 	@mkdir -p keys
-	@for f in mongodb_uri news_admin_password client_id client_secret; do \
+	@for f in mongodb_uri news_admin_password openai_api_key client_id client_secret; do \
 		if [ -e "keys/$$f" ] || [ -L "keys/$$f" ]; then \
 			echo "keys/$$f       EXISTS"; \
 		else \
