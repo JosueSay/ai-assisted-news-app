@@ -44,6 +44,16 @@ class FakeCollection:
                 return document
         return None
 
+    def find(self, query=None):
+        documents = list(self.documents.values())
+        if not query:
+            return documents
+        return [
+            document
+            for document in documents
+            if all(document.get(key) == value for key, value in query.items())
+        ]
+
     def replace_one(self, filter_query, replacement, upsert=False):
         document_id = filter_query["_id"]
         existed = document_id in self.documents
