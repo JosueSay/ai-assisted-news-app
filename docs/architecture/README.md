@@ -1,5 +1,11 @@
 # Arquitectura
 
+Documentos de referencia actuales:
+
+- [Contrato compartido de noticias implementado](contrato-compartido-noticias.md).
+- [Arquitectura pendiente del chat: JEV + CODE + LLM](chatbot-jev-code-llm-pendientes.md):
+  brechas del diagrama, decisiones y orden de los siguientes loops; todavía no implementado.
+
 > Este documento conserva una propuesta histórica. El comportamiento vigente de
 > API y chat se describe en [el contrato compartido de noticias](../architecture/contrato-compartido-noticias.md).
 

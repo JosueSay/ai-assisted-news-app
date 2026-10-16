@@ -58,3 +58,8 @@ API comprueba presencia del archivo de key sin leerlo y exige precios configurad
 
 Consulta DB, contexto geográfico y prompt:
 `backend/loops/handoffs/news-chat-database-queries-result.md`.
+
+Se documentan las brechas pendientes frente al diagrama JEV + CODE + LLM y seis
+loops propuestos en `docs/architecture/chatbot-jev-code-llm-pendientes.md`. Es un
+plan documental: no declara implementados el catálogo o los routers pendientes
+ni modifica el esquema de DB.

@@ -40,6 +40,8 @@ make news-contract-check  # detecta contratos desactualizados sin conectar a DB
 ```
 
 Consulta [el contrato compartido](docs/architecture/contrato-compartido-noticias.md).
+Los [siguientes pasos de arquitectura del chat](docs/architecture/chatbot-jev-code-llm-pendientes.md)
+comparan el estado actual con el diagrama JEV + CODE + LLM y proponen seis loops de implementación.
 Para un teléfono físico configura las dos URLs `EXPO_PUBLIC_*_API_BASE_URL` con la
 IP LAN de tu computadora. El túnel de Expo solo publica Metro. Puedes anunciar la
 IP de Metro con `REACT_NATIVE_PACKAGER_HOSTNAME=<IP LAN>` al iniciar Compose.

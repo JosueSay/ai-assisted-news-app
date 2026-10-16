@@ -136,6 +136,10 @@ Variables propias del modo: `CHAT_SESSION_TTL_SECONDS`, `NEWS_AI_BUDGET_USD`,
 
 Los modos `projection` y `novu` se conservan sin cambios para el uso original del asistente.
 
+El [plan de arquitectura JEV + CODE + LLM](../../docs/architecture/chatbot-jev-code-llm-pendientes.md)
+documenta lo que falta del diagrama original. El catálogo de capacidades y los routers
+de alcance/parciales aún están pendientes; no deben confundirse con las reglas actuales.
+
 ### Probar conteos y países
 
 Después de cambiar el código o la configuración, recrear el proceso del chat:
