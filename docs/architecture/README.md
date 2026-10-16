@@ -1,5 +1,9 @@
 # Arquitectura
 
+> Este documento conserva una propuesta histórica. El comportamiento vigente de
+> API y chat se describe en [el contrato compartido de noticias](../architecture/contrato-compartido-noticias.md).
+
+
 Estado: propuesta v1 (2026-10-03). Cubre la API principal. El asistente (`backend/assistant`) lo
 mantiene otro integrante; aquí solo aparece como dependencia.
 

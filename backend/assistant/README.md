@@ -21,7 +21,7 @@ flujo sin clave ni costo. Necesita la base de noticias inicializada:
 ```bash
 cd /ruta/a/ai-assisted-news-app
 make env-local
-make db-init && make db-seed-catalog && make db-seed-demo
+make db-bootstrap && make db-verify
 docker compose up --build
 ```
 
@@ -62,7 +62,7 @@ No se debe agregar `.env` al repositorio.
 
 ## Editar el prompt
 
-Modificá [`prompts/system.md`](prompts/system.md). Compose monta el directorio como volumen de sólo
+Para noticias modifica [`prompts/news.md`](prompts/news.md); `system.md` corresponde a los modos históricos. Compose monta el directorio como volumen de sólo
 lectura y el servicio carga el archivo en cada turno; no hace falta reconstruir la imagen. En otros
 entornos, `CHATBOT_PROMPT_FILE` puede apuntar a otro archivo absoluto o relativo a esta carpeta.
 
@@ -113,7 +113,12 @@ POST /chat
   historial se envía al modelo en cada turno con `store=false`, en lugar de `previous_response_id`.
 - La intención (`recent_news`, `regional_news`, `topic_news`, `news_detail`, `summarize`,
   `explain`, `unsupported`) se clasifica con reglas, sin IA (`news_chat/intent.py`).
-- Con `CHATBOT_PROVIDER=openai` responde con el modelo (`strategy = "llm"`) usando las noticias
+- Los conteos y listados por país se resuelven consultando MongoDB (`strategy = "database_query"`),
+  también al elegir OpenAI. «Cuántas noticias hay» distingue total, publicadas y borradores;
+  «qué noticias tienes por país» muestra cantidades y un ejemplo publicado por país. Estas
+  consultas no usan IA ni los límites de cinco ejemplos o 200 noticias recientes para contar.
+  Solo se citan publicaciones; los borradores aportan únicamente su cantidad.
+- Con `CHATBOT_PROVIDER=openai` el resto de las respuestas usa el modelo (`strategy = "llm"`) con las noticias
   como contexto autorizado y registra cada llamada en `aiUsage`. Requiere `keys/openai_api_key`,
   `NEWS_CHAT_INPUT_USD_PER_MILLION` y `NEWS_CHAT_OUTPUT_USD_PER_MILLION`.
 - Con `stub`, sin presupuesto (`NEWS_AI_BUDGET_USD`, 20 por defecto) o si OpenAI falla, responde
@@ -131,6 +136,39 @@ Variables propias del modo: `CHAT_SESSION_TTL_SECONDS`, `NEWS_AI_BUDGET_USD`,
 
 Los modos `projection` y `novu` se conservan sin cambios para el uso original del asistente.
 
+### Probar conteos y países
+
+Después de cambiar el código o la configuración, recrear el proceso del chat:
+
+```bash
+docker compose up -d --force-recreate chatbot
+```
+
+En el chat, probar «dame la cantidad de noticias que tienes tu en tu base de datos de este ai news»,
+«qué noticias tienes por país», «cuántas noticias tienes de Guatemala» y «noticias de México».
+Con las fixtures canónicas el conteo es 32 en total, 28 publicadas y cuatro borradores; si
+coexisten las cinco demos históricas, es 37 en total, 33 publicadas y cuatro borradores.
+Los conteos siempre se calculan en la colección actual, no están fijados a esos valores.
+
+El prompt `news-v3` recibe inventario real y las ubicaciones resueltas desde el catálogo.
+El contexto identifica qué noticias son una muestra; su longitud no es el tamaño de la base.
+Los IDs sin referencia resuelta se indican como tales, sin inventar países. Las consultas
+estructuradas de país/tema filtran en MongoDB antes de limitar los ejemplos.
+
+El planificador interpreta seguimientos desde los mensajes de la sesión vigente:
+«de qué países son», «resúmelas» y «ok sí hazlo» conservan las citas anteriores.
+«Y de México» mantiene el tema o la operación de conteo del turno anterior.
+Las referencias se vuelven a consultar para citar únicamente noticias todavía publicadas.
+La sesión sigue venciendo a los 3600 segundos y pertenece al mismo usuario.
+Una solicitud completa nueva reemplaza los filtros; una consulta sin resultados no
+recupera artículos de otra selección. El historial se deriva de `chatSessions.messages`,
+sin añadir campos persistidos ni guardar la conversación en OpenAI.
+
+Para probar contexto, enviar en la misma conversación «Noticias de México»,
+«de qué países son» y «ok sí hazlo». Este último mensaje llega al modelo con la
+respuesta anterior. Si se habían ofrecido varias opciones, el prompt pide aclarar
+cuál se acepta en vez de elegir arbitrariamente o tratarlo como fuera de dominio.
+
 ## Ejecución local sin Docker
 
 Desde `backend/`:
@@ -138,11 +176,14 @@ Desde `backend/`:
 ```bash
 python3 -m venv assistant/.venv
 source assistant/.venv/bin/activate
-python -m pip install -r assistant/requirements-dev.txt
-python -m uvicorn assistant.app:app --reload --port 8010
+python -m pip install -r assistant/requirements-dev.txt -r news/requirements-dev.txt
+python -m assistant.news_chat.run
 ```
 
-Terminal:
+Para los modos históricos, configura `MONGODB_CONTEXT_MODE=projection` o `novu`
+y ejecuta `uvicorn assistant.app:app --port 8010`; su CLI usa el contrato histórico.
+
+Terminal (modos históricos):
 
 ```bash
 python -m assistant.cli
@@ -197,3 +238,18 @@ assistant/
 
 El `docker-compose.yml` está en la raíz del proyecto porque este directorio contiene únicamente el
 servicio del asistente, no un backend completo.
+
+El contrato de noticias y sus fuentes canónicas están documentados en
+[contrato compartido](../../docs/architecture/contrato-compartido-noticias.md).
+El chat de un administrador requiere el mismo Bearer de `/admin/login`.
+
+
+## Selección del proveedor desde Make
+
+Desde la raíz: `make chatbot-stub` o `make chatbot-api` (`chatbot-openai` es alias).
+Después ejecuta `make chatbot-up` para recrear el servicio con esa selección.
+Los comandos conservan DB, URLs y otros ajustes del `.env`. El modo OpenAI exige
+el archivo de key existente/no vacío y ambos precios por millón de tokens,
+configurados en `.env` o mediante argumentos Make con los mismos nombres de variable.
+El modelo se puede indicar con `OPENAI_MODEL`. No hay tarifas inventadas, lectura
+del secreto por el selector ni llamadas API durante la configuración.

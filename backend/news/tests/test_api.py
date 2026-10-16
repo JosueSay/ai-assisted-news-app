@@ -56,7 +56,14 @@ def test_document_to_article_falls_back_to_actualidad_for_unknown_topic() -> Non
         "publishedAt": None,
         "content": "Contenido",
         "estimatedReadingMinutes": 1,
-        "sources": [{"name": "Fuente prueba"}],
+        "sources": [
+            {
+                "name": "Fuente prueba",
+                "url": "https://example.com",
+                "sourceType": "media",
+                "accessedAt": datetime(2026, 10, 4, tzinfo=timezone.utc),
+            }
+        ],
         "image": {},
     }
 
@@ -72,7 +79,9 @@ def test_create_news_document_inserts_news_author_and_audit_log() -> None:
     location = catalog_location_document(
         {"code": "GT", "name": "Guatemala", "country": "Guatemala"}
     )
-    db["locations"].replace_one({"_id": CATALOG_LOCATION_IDS["GT"]}, location, upsert=True)
+    db["locations"].replace_one(
+        {"_id": CATALOG_LOCATION_IDS["GT"]}, location, upsert=True
+    )
     payload = AdminNewsCreateRequest(
         title="Nueva noticia manual",
         slug="nueva-noticia-manual",
@@ -93,3 +102,25 @@ def test_create_news_document_inserts_news_author_and_audit_log() -> None:
     assert document["authorId"] in db["users"].documents
     assert len(db["news"].documents) == 1
     assert len(db["auditLogs"].documents) == 1
+
+
+def test_api_preserves_approved_dataset_topics_and_metadata() -> None:
+    from news.demo_news import get_demo_news_documents
+    from news.models.news import News
+    from news.topics import TOPICS
+
+    for document in get_demo_news_documents():
+        News.model_validate(document)
+        article = document_to_article(AuthorFakeDatabase(), document)
+        assert article.category == document["topics"][0]
+        assert article.topics == document["topics"]
+        assert article.geographicScope.locationIds == [
+            str(location_id)
+            for location_id in document["geographicScope"]["locationIds"]
+        ]
+        assert article.verification.status == document["verification"]["status"]
+        assert len(article.sources) == len(document["sources"])
+        assert article.image.type == document["image"]["type"]
+        assert article.image.aiDisclosure == document["image"]["aiDisclosure"]
+        assert article.aiAssistance.model_dump() == document["aiAssistance"]
+        assert set(article.topics) <= set(TOPICS)

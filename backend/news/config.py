@@ -7,7 +7,7 @@ Los valores secretos (MONGODB_URI) se cargan desde archivos en keys/.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -36,7 +36,10 @@ class NewsDatabaseConfigurationError(RuntimeError):
 def _resolve_path(raw: str) -> Path:
     path = Path(raw)
     if not path.is_absolute():
-        path = NEWS_ROOT / path
+        # .env raíz documenta keys/...; conservar ../../keys/... del .env legacy.
+        path = (
+            PROJECT_ROOT if path.parts and path.parts[0] == "keys" else NEWS_ROOT
+        ) / path
     return path.resolve()
 
 
@@ -58,6 +61,7 @@ class NewsSettings:
         if self.mongodb_mode == "local":
             return bool(self.mongodb_local_uri.strip())
         from .secret_loader import check_secret_file
+
         return check_secret_file(self.mongodb_uri_file) == "configured"
 
     @property

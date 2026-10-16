@@ -238,9 +238,9 @@ base: lee desde `news`, busca el autor en `users` y deriva la categoría desde `
 ## Prueba local con frontend
 
 ```bash
-make db-init
-make db-seed-demo
-docker compose up -d --build frontend
+make db-bootstrap
+make db-verify
+docker compose up -d --build news-api chatbot frontend
 ```
 
 Luego abrir:
@@ -280,3 +280,16 @@ muestra un estado de error. El frontend no mantiene un dataset local como fallba
   (`RESEED <db>` en local, `RESEED ATLAS <db>` en Atlas); sin ella aborta sin
   modificar nada. No existe `--force`. Detalle en
   `docs/design/database/11-automatizacion-y-reseed.md`.
+
+
+## Contrato compartido de API y chat
+
+La API conserva todos los topics, fuentes, verificación, alcance geográfico y
+metadatos de imagen/IA de los modelos aprobados. El chat reutiliza esos modelos
+y el catálogo de 14 topics. `make news-contract` genera el catálogo/tipos Expo;
+`make news-contract-check` detecta drift sin DB ni credenciales. El detalle por
+slug permite abrir citas fuera de la página del feed.
+
+El administrador de publicación y chat usa `local-admin:<username>` y el mismo
+token; no se migran ni eliminan usuarios antiguos automáticamente. Ver
+[contrato compartido](../../docs/architecture/contrato-compartido-noticias.md).

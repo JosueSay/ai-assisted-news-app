@@ -1,14 +1,11 @@
 """Tests para el módulo config."""
 
 import os
-from pathlib import Path
-
-import pytest
 
 from news.config import (
-    DEFAULT_DATABASE,
     DEFAULT_ADMIN_TOKEN_TTL_SECONDS,
     DEFAULT_ADMIN_USERNAME,
+    DEFAULT_DATABASE,
     DEFAULT_MODE,
     DEFAULT_REQUIRED,
     DEFAULT_TIMEOUT_MS,
@@ -56,3 +53,14 @@ class TestGetNewsSettings:
         assert settings.mongodb_mode == "local"
         assert settings.mongodb_configured is True
         assert settings.uses_secret_file is False
+
+
+def test_root_secret_paths_resolve_identically_in_local_python_and_compose(monkeypatch):
+    from news.config import PROJECT_ROOT, _resolve_path
+
+    assert _resolve_path("keys/mongodb_uri") == PROJECT_ROOT / "keys/mongodb_uri"
+    assert (
+        _resolve_path("keys/news_admin_password")
+        == PROJECT_ROOT / "keys/news_admin_password"
+    )
+    assert _resolve_path("../../keys/mongodb_uri") == PROJECT_ROOT / "keys/mongodb_uri"

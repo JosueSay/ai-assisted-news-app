@@ -29,7 +29,7 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
       OPENAI_API_KEY_FILE: /app/keys/openai_api_key
       CHATBOT_PROMPT_FILE: prompts/news.md
-      CHATBOT_PROMPT_VERSION: ${CHATBOT_PROMPT_VERSION:-news-v1}
+      CHATBOT_PROMPT_VERSION: ${CHATBOT_PROMPT_VERSION:-news-v3}
       CHATBOT_ALLOWED_ORIGINS: ${CHATBOT_ALLOWED_ORIGINS:-http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006,http://127.0.0.1:19006}
       MONGODB_CONTEXT_MODE: news
       MONGODB_REQUIRED: "true"
@@ -46,7 +46,8 @@ services:
     ports:
       - "8010:8010"
     volumes:
-      - ./backend/assistant/prompts:/app/assistant/prompts:ro
+      - ./backend/assistant:/app/assistant:ro
+      - ./backend/news:/app/news:ro
       - ./keys:/app/keys:ro
     depends_on:
       news-mongo:
@@ -104,6 +105,8 @@ services:
     depends_on:
       news-api:
         condition: service_healthy
+      chatbot:
+        condition: service_healthy
     restart: unless-stopped
 
   news-mongo:
@@ -145,6 +148,7 @@ services:
     volumes:
       - ./backend:/app/backend
       - ./keys:/app/keys:ro
+      - ./frontend/src/generated:/app/frontend/src/generated
     restart: "no"
 
   news-api:

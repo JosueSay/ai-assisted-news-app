@@ -67,9 +67,7 @@ def verification_label(document: dict[str, Any]) -> str:
 
 
 async def find_published_news(database, news_id: ObjectId) -> dict[str, Any] | None:
-    return await database["news"].find_one(
-        {"_id": news_id, "status": "published"}, NEWS_PROJECTION
-    )
+    return await database["news"].find_one({"_id": news_id, "status": "published"}, NEWS_PROJECTION)
 
 
 async def find_published_news_by_ids(database, news_ids: list[ObjectId]) -> list[dict[str, Any]]:
@@ -94,6 +92,57 @@ async def recent_published_news(database) -> list[dict[str, Any]]:
     )
 
 
+def news_filters(query: ClassifiedQuery, location_ids: set[ObjectId]) -> dict[str, Any]:
+    """Filtros estructurados del catálogo, sin ejecutar instrucciones del usuario."""
+    filters: dict[str, Any] = {}
+    if query.country_codes or query.wants_user_location:
+        filters["geographicScope.locationIds"] = {"$in": list(location_ids)}
+    if query.topics:
+        filters["topics"] = {"$in": list(query.topics)}
+    return filters
+
+
+async def count_news(database, filters: dict[str, Any] | None = None) -> dict[str, int]:
+    """Cuenta toda la selección en MongoDB, sin aplicar límites del listado."""
+    filters = filters or {}
+    return {
+        "total": await database["news"].count_documents(filters),
+        "published": await database["news"].count_documents({**filters, "status": "published"}),
+        "draft": await database["news"].count_documents({**filters, "status": "draft"}),
+    }
+
+
+async def published_news_matching(
+    database, filters: dict[str, Any], *, limit: int = LISTING_LIMIT
+) -> list[dict[str, Any]]:
+    return await (
+        database["news"]
+        .find({**filters, "status": "published"}, NEWS_PROJECTION)
+        .sort("publishedAt", -1)
+        .limit(limit)
+        .to_list(length=limit)
+    )
+
+
+async def resolve_news_locations(database, documents: list[dict[str, Any]]) -> dict[ObjectId, dict]:
+    ids = {
+        ref
+        for document in documents
+        for ref in (document.get("geographicScope") or {}).get("locationIds") or []
+    }
+    if not ids:
+        return {}
+    locations = (
+        await database["locations"]
+        .find(
+            {"_id": {"$in": list(ids)}},
+            {"name": 1, "country": 1, "countryCode": 1, "region": 1, "city": 1},
+        )
+        .to_list(length=None)
+    )
+    return {location["_id"]: location for location in locations}
+
+
 def _searchable_text(document: dict[str, Any]) -> str:
     parts = [
         str(document.get("title") or ""),
@@ -111,7 +160,7 @@ def _matches_location(document: dict[str, Any], location_ids: set[ObjectId]) -> 
 
 def _matches_topic(document: dict[str, Any], topics: tuple[str, ...]) -> bool:
     document_topics = {normalize_text(str(topic)) for topic in document.get("topics") or []}
-    return any(topic in document_topics for topic in topics)
+    return any(normalize_text(topic) in document_topics for topic in topics)
 
 
 def _term_score(document: dict[str, Any], terms: tuple[str, ...]) -> int:
@@ -235,14 +284,39 @@ def format_detail(document: dict[str, Any]) -> str:
     )
 
 
-def news_context(documents: list[dict[str, Any]], *, include_content: bool) -> list[dict[str, Any]]:
+def news_context(
+    documents: list[dict[str, Any]],
+    *,
+    include_content: bool,
+    locations: dict[ObjectId, dict] | None = None,
+) -> list[dict[str, Any]]:
     """Proyección de noticias que se entrega al modelo como datos."""
     context = []
+    locations = locations or {}
     for document in documents:
+        scope = document.get("geographicScope") or {}
+        location_ids = scope.get("locationIds") or []
         item: dict[str, Any] = {
             "id": str(document["_id"]),
             "title": document.get("title"),
             "summary": document.get("summary"),
+            "topics": document.get("topics") or [],
+            "geographicScope": {
+                "level": _plain(scope["level"]) if scope.get("level") else None,
+                "locationIds": [str(ref) for ref in location_ids],
+                "locations": [
+                    {
+                        "id": str(ref),
+                        **{
+                            key: locations[ref].get(key)
+                            for key in ("name", "country", "countryCode", "region", "city")
+                        },
+                    }
+                    for ref in location_ids
+                    if ref in locations
+                ],
+                "unresolvedLocationIds": [str(ref) for ref in location_ids if ref not in locations],
+            },
             "verificationStatus": verification_status(document),
             "sources": [
                 {"name": source.get("name"), "sourceType": _plain(source.get("sourceType"))}

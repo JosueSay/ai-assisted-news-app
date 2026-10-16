@@ -40,6 +40,7 @@ import {
 import {
   createAdminNews,
   fetchNewsFeedWithStatus,
+  fetchNewsArticleBySlug,
   fetchLocations,
   getArticleBySlug,
   getArticlesByCategory,
@@ -162,6 +163,8 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
 
   const [articles, setArticles] = useState<NewsArticle[]>([]);
   const [isFeedLoading, setIsFeedLoading] = useState(true);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [feedError, setFeedError] = useState<string | null>(null);
   const [route, setRoute] = useState<NewsRoute>(getInitialRoute);
   const [searchQuery, setSearchQuery] = useState("");
@@ -237,6 +240,27 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
+
+  const detailSlug = route.name === "article" || route.name === "chat" ? route.slug : undefined;
+  const hasDetail = !detailSlug || articles.some((article) => article.slug === detailSlug);
+  useEffect(() => {
+    setDetailError(null);
+    if (!detailSlug || hasDetail || isFeedLoading) return;
+    let active = true;
+    setIsDetailLoading(true);
+    void fetchNewsArticleBySlug(detailSlug)
+      .then((article) => {
+        if (active && article) setArticles((current) => [...current, article]);
+        if (active && !article) setDetailError("La noticia no existe o no está publicada.");
+      })
+      .catch(() => {
+        if (active) setDetailError("No pudimos cargar la noticia. Intenta de nuevo.");
+      })
+      .finally(() => {
+        if (active) setIsDetailLoading(false);
+      });
+    return () => { active = false; };
+  }, [detailSlug, hasDetail, isFeedLoading]);
 
   const currentArticle = useMemo(
     () => (route.name === "article" ? getArticleBySlug(route.slug, articles) : null),
@@ -959,6 +983,22 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
 
           <ArticleImage image={currentArticle.image} size="lead" />
           <Text style={styles.credit}>{currentArticle.image.credit}</Text>
+          {currentArticle.image.aiDisclosure ? (
+            <Text style={styles.credit}>{currentArticle.image.aiDisclosure}</Text>
+          ) : null}
+          {currentArticle.verification ? (
+            <Text style={styles.articleMeta}>
+              Verificación: {{
+                confirmed: "Confirmada",
+                developing: "En desarrollo",
+                insufficient_sources: "Fuentes insuficientes",
+                conflicting_sources: "Fuentes contradictorias",
+              }[currentArticle.verification.status]}
+            </Text>
+          ) : null}
+          {currentArticle.sources.map((source) => (
+            <Text key={source.url} style={styles.credit}>Fuente: {source.name} · {source.url}</Text>
+          ))}
 
           <Pressable
             accessibilityRole="button"
@@ -1001,7 +1041,17 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
   };
 
   const renderContent = () => {
-    if (isFeedLoading) return renderLoading();
+    if (isFeedLoading || (detailSlug && !hasDetail && (isDetailLoading || !detailError))) {
+      return renderLoading();
+    }
+    if (detailSlug && !hasDetail && detailError) {
+      return (
+        <View style={styles.emptyState}>
+          <Text accessibilityRole="alert" style={styles.emptyText}>{detailError}</Text>
+          <AppButton label="Volver al inicio" onPress={() => navigate({ name: "home" })} />
+        </View>
+      );
+    }
     if (route.name === "adminCreate") return renderAdminCreate();
     if (route.name === "saved") return renderSaved();
     if (route.name === "chat") {

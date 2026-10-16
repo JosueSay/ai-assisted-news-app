@@ -4,6 +4,9 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from news.auth import AdminAuthenticationError, authorized_admin_username
+from news.config import get_news_settings
+from news.secret_loader import SecretFileError
 from pymongo.errors import PyMongoError
 
 from .config import ChatbotConfigurationError, api_key_is_configured, get_settings
@@ -117,7 +120,7 @@ def create_app() -> FastAPI:
         allow_origins=list(settings.allowed_origins),
         allow_credentials=False,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "Authorization"],
     )
 
     @application.exception_handler(ChatbotConfigurationError)
@@ -144,10 +147,25 @@ def create_app() -> FastAPI:
 
         @application.post("/chat", response_model=news_schemas.ChatReply)
         async def news_chat(
-            chat_request: news_schemas.ChatRequest, service: NewsChatServiceDependency
+            chat_request: news_schemas.ChatRequest,
+            request: Request,
+            service: NewsChatServiceDependency,
         ) -> news_schemas.ChatReply:
             try:
-                return await service.reply(chat_request)
+                admin_username = None
+                if chat_request.user.id.startswith(("admin:", "local-admin:")):
+                    admin_username = authorized_admin_username(
+                        request.headers.get("Authorization", ""), get_news_settings()
+                    )
+                return await service.reply(chat_request, admin_username=admin_username)
+            except AdminAuthenticationError as error:
+                raise HTTPException(
+                    status_code=401, detail="Token admin inválido o requerido."
+                ) from error
+            except SecretFileError as error:
+                raise HTTPException(
+                    status_code=503, detail="La autenticación admin no está configurada."
+                ) from error
             except ChatbotConfigurationError as error:
                 raise HTTPException(status_code=503, detail=str(error)) from error
             except NewsChatRequestError as error:

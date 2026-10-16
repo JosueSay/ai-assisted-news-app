@@ -1,23 +1,17 @@
 import type { AppUser } from "../types";
 
-export type ChatStrategy = "database_query" | "template" | "llm";
+import type { ResponseStrategy, ResponseIntent, ConfidenceLevel, VerificationStatus }
+  from "../generated/newsContract";
 
-export type ChatIntent =
-  | "recent_news"
-  | "regional_news"
-  | "topic_news"
-  | "news_detail"
-  | "summarize"
-  | "explain"
-  | "unsupported";
-
-export type ChatConfidence = "high" | "medium" | "low";
+export type ChatStrategy = ResponseStrategy;
+export type ChatIntent = ResponseIntent;
+export type ChatConfidence = ConfidenceLevel;
 
 export type ChatCitedNews = {
   id: string;
   slug: string;
   title: string;
-  verificationStatus: string;
+  verificationStatus: VerificationStatus;
 };
 
 export type ChatAssistantMessage = {
@@ -68,7 +62,10 @@ export function isSessionActive(expiresAt: string | null, now: Date = new Date()
 export async function sendChatMessage(input: ChatSendInput): Promise<ChatReply> {
   const response = await fetch(`${ASSISTANT_API_BASE_URL}/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(input.user.adminToken ? { Authorization: `Bearer ${input.user.adminToken}` } : {}),
+    },
     body: JSON.stringify({
       message: input.message,
       sessionId: input.sessionId ?? null,

@@ -1,12 +1,13 @@
-export const CATEGORIES = [
-  { id: "actualidad", label: "Actualidad" },
-  { id: "tecnologia", label: "Tecnología" },
-  { id: "economia", label: "Economía" },
-  { id: "cultura", label: "Cultura" },
-  { id: "deportes", label: "Deportes" },
-] as const;
-
-export type CategoryId = (typeof CATEGORIES)[number]["id"];
+import {
+  CATEGORIES,
+  type CategoryId,
+  type ImageType,
+  type LocationLevel,
+  type SourceType,
+  type VerificationStatus,
+  type UserRole,
+} from "./generated/newsContract";
+export { CATEGORIES, type CategoryId } from "./generated/newsContract";
 
 export function getCategoryLabel(categoryId: CategoryId) {
   return CATEGORIES.find((category) => category.id === categoryId)?.label ?? categoryId;
@@ -20,6 +21,8 @@ export type ArticleImage = {
   credit: string;
   sourceUrl: string;
   license: string;
+  type: ImageType;
+  aiDisclosure: string | null;
 };
 
 export type NewsArticle = {
@@ -28,6 +31,28 @@ export type NewsArticle = {
   title: string;
   summary: string;
   category: CategoryId;
+  topics: string[];
+  geographicScope: { level: LocationLevel; locationIds: string[] } | null;
+  verification: {
+    status: VerificationStatus;
+    reviewedBy: string | null;
+    reviewedAt: string | null;
+    notes: string | null;
+  } | null;
+  sources: {
+    name: string;
+    url: string;
+    sourceType: SourceType;
+    publishedAt: string | null;
+    accessedAt: string;
+    supports: string | null;
+  }[];
+  aiAssistance: {
+    summaryGenerated: boolean;
+    topicsGenerated: boolean;
+    imageGenerated: boolean;
+    humanReviewed: boolean;
+  };
   author: string;
   publishedAt: string;
   body: string[];
@@ -42,6 +67,6 @@ export type AppUser = {
   email: string;
   photoUrl?: string;
   isGuest: boolean;
-  role?: "user" | "admin";
+  role?: UserRole;
   adminToken?: string;
 };

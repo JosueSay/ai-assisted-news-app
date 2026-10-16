@@ -15,6 +15,9 @@ const articles: NewsArticle[] = [
     title: "Jóvenes desarrollan sensores para cuidar los huertos urbanos",
     summary: "Sensores de bajo costo para riego comunitario.",
     category: "tecnologia",
+    topics: ["tecnologia"],
+    geographicScope: null, verification: null, sources: [],
+    aiAssistance: { summaryGenerated: false, topicsGenerated: false, imageGenerated: false, humanReviewed: false },
     author: "Redacción",
     publishedAt: "2026-10-04T07:20:00-06:00",
     body: ["Primer párrafo.", "Segundo párrafo."],
@@ -22,6 +25,7 @@ const articles: NewsArticle[] = [
     source: "MongoDB",
     image: {
       src: null,
+      type: "none", aiDisclosure: null,
       alt: "Huerto urbano",
       width: 960,
       height: 540,
@@ -36,6 +40,9 @@ const articles: NewsArticle[] = [
     title: "Bibliotecas abren una ruta de lectura",
     summary: "Lecturas al aire libre para barrios.",
     category: "cultura",
+    topics: ["cultura"],
+    geographicScope: null, verification: null, sources: [],
+    aiAssistance: { summaryGenerated: false, topicsGenerated: false, imageGenerated: false, humanReviewed: false },
     author: "Redacción",
     publishedAt: "2026-10-03T07:20:00-06:00",
     body: ["Contenido."],
@@ -43,6 +50,7 @@ const articles: NewsArticle[] = [
     source: "MongoDB",
     image: {
       src: null,
+      type: "none", aiDisclosure: null,
       alt: "Biblioteca",
       width: 960,
       height: 540,
@@ -91,4 +99,27 @@ describe("newsService", () => {
     expect(searchArticles("tecnologia", articles)).toHaveLength(1);
     expect(searchArticles("bibliotecas", articles)).toHaveLength(1);
   });
+});
+
+it("filters and searches all topics instead of only the first category", async () => {
+  const { getArticlesByCategory } = await import("../src/services/newsService");
+  const multipleTopics = { ...articles[0], topics: ["tecnologia", "salud"] } as NewsArticle;
+  expect(getArticlesByCategory("salud", [multipleTopics])).toHaveLength(1);
+  expect(searchArticles("salud", [multipleTopics])).toHaveLength(1);
+});
+
+it("loads a cited article directly even when it is absent from the feed", async () => {
+  const { fetchNewsArticleBySlug } = await import("../src/services/newsService");
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => articles[0] });
+  vi.stubGlobal("fetch", fetchMock);
+  expect(await fetchNewsArticleBySlug("noticia antigua")).toEqual(articles[0]);
+  expect(fetchMock.mock.calls[0][0]).toMatch(/\/news\/noticia%20antigua$/);
+});
+
+it("distinguishes a missing citation from an API failure", async () => {
+  const { fetchNewsArticleBySlug } = await import("../src/services/newsService");
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
+  expect(await fetchNewsArticleBySlug("missing")).toBeNull();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+  await expect(fetchNewsArticleBySlug("unavailable")).rejects.toThrow();
 });

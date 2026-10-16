@@ -1,5 +1,9 @@
 # Contratos de API
 
+> Este documento conserva una propuesta histórica. El comportamiento vigente de
+> API y chat se describe en [el contrato compartido de noticias](../architecture/contrato-compartido-noticias.md).
+
+
 Estado: borrador v1 (2026-10-03). API principal en `backend/services/api`. Base: `/v1`.
 
 ## Convenciones

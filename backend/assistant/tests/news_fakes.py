@@ -27,14 +27,19 @@ def _matches(document: dict[str, Any], query: dict[str, Any]) -> bool:
             if not any(_matches(document, sub_query) for sub_query in condition):
                 return False
             continue
-        value = document.get(key)
+        value = document
+        for segment in key.split("."):
+            value = value.get(segment) if isinstance(value, dict) else None
         if isinstance(condition, dict):
             for operator, operand in condition.items():
                 if operator == "$gt":
                     if value is None or not _comparable(value) > _comparable(operand):
                         return False
                 elif operator == "$in":
-                    if _comparable(value) not in [_comparable(item) for item in operand]:
+                    values = value if isinstance(value, list) else [value]
+                    if not any(
+                        _comparable(item) in [_comparable(v) for v in operand] for item in values
+                    ):
                         return False
                 else:
                     raise AssertionError(f"Operador no soportado: {operator}")
@@ -84,13 +89,18 @@ class FakeCollection:
     def find(self, query: dict[str, Any], _projection=None) -> FakeCursor:
         return FakeCursor([copy.deepcopy(item) for item in self.documents if _matches(item, query)])
 
+    async def count_documents(self, query: dict[str, Any]) -> int:
+        return sum(_matches(item, query) for item in self.documents)
+
     async def update_one(self, query: dict[str, Any], update: dict[str, Any]):
         for document in self.documents:
             if _matches(document, query):
                 for key, value in update.get("$set", {}).items():
                     document[key] = value
                 for key, value in update.get("$push", {}).items():
-                    items = value["$each"] if isinstance(value, dict) and "$each" in value else [value]
+                    items = (
+                        value["$each"] if isinstance(value, dict) and "$each" in value else [value]
+                    )
                     document.setdefault(key, []).extend(copy.deepcopy(items))
                 return SimpleNamespace(matched_count=1)
         return SimpleNamespace(matched_count=0)

@@ -1,4 +1,6 @@
 .PHONY: env-local env-atlas db-check-config db-ping db-test db-init db-schema-check db-seed-catalog db-seed-catalogs db-seed-check db-seed-demo db-seed-news db-news-check db-bootstrap db-verify db-reseed-dry-run db-reseed news-db-up news-db-down news-api-up setup-keys
+.PHONY: chatbot-up chatbot-test news-contract news-contract-check news-integration-test
+.PHONY: chatbot-stub chatbot-api chatbot-openai chatbot-config-test
 
 -include .env
 
@@ -17,6 +19,10 @@ export NEWS_MONGODB_TIMEOUT_MS
 export NEWS_LOCAL_MONGO_PORT
 export NEWS_API_PORT
 export COMPOSE_PROFILES
+# Parámetros no secretos para seleccionar OpenAI sin interpolarlos en shell.
+export OPENAI_MODEL
+export NEWS_CHAT_INPUT_USD_PER_MILLION
+export NEWS_CHAT_OUTPUT_USD_PER_MILLION
 
 define ensure_news_db
 	@if [ "$(NEWS_DB_MODE)" = "local" ]; then \
@@ -155,6 +161,17 @@ news-api-up:
 	$(call ensure_news_db)
 	@$(DOCKER_COMPOSE) up -d news-api
 
+chatbot-stub:
+	@python3 scripts/configure_chatbot.py stub
+
+chatbot-api: chatbot-openai
+
+chatbot-openai:
+	@python3 scripts/configure_chatbot.py openai
+
+chatbot-config-test:
+	@python3 -m unittest discover -s tests/unit -p test_configure_chatbot.py -v
+
 chatbot-up:
 	$(call ensure_news_db)
 	@$(DOCKER_COMPOSE) up -d --build chatbot
@@ -163,6 +180,13 @@ chatbot-test:
 	@echo "=== Running assistant tests (incluye smoke test contra el chatbot) ==="
 	$(call ensure_news_db)
 	@$(DOCKER_COMPOSE) --profile test run --rm --build tests
+
+# Estos comandos no requieren DB ni credenciales y no levantan dependencias.
+news-contract:
+	@$(DOCKER_COMPOSE) --profile tools run --rm --no-deps --user "$$(id -u):$$(id -g)" news-tools python -m news.export_contract
+
+news-contract-check:
+	@$(DOCKER_COMPOSE) --profile tools run --rm --no-deps news-tools python -m news.export_contract --check
 
 setup-keys:
 	@echo "=== Setting up secret files ==="
@@ -180,3 +204,6 @@ setup-keys:
 	@echo "Then run:"
 	@echo "make db-check-config"
 	@echo "make db-ping"
+
+news-integration-test:
+	@bash scripts/news-integration-test.sh

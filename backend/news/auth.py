@@ -11,6 +11,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from .secret_loader import load_secret
+
 
 class AdminAuthenticationError(RuntimeError):
     """Credenciales o token admin inválidos."""
@@ -55,7 +57,9 @@ def create_admin_token(
         "role": "admin",
         "exp": issued_at + ttl_seconds,
     }
-    payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode(
+        "utf-8"
+    )
     payload_part = _base64url_encode(payload_json)
     signature = _sign(payload_part, secret)
     return f"{payload_part}.{signature}"
@@ -90,3 +94,14 @@ def verify_admin_token(
         raise AdminAuthenticationError("Token admin expirado o inválido.")
 
     return AdminTokenPayload(username=username, role=role, exp=exp)
+
+
+def authorized_admin_username(authorization: str, settings) -> str:
+    """Verifica el mismo Bearer para API y chat. Nunca confía en el rol del cliente."""
+    if not authorization.startswith("Bearer "):
+        raise AdminAuthenticationError("Token admin requerido.")
+    secret = load_secret(settings.admin_password_file)
+    payload = verify_admin_token(authorization[len("Bearer ") :].strip(), secret)
+    if payload.username != settings.admin_username:
+        raise AdminAuthenticationError("Token admin inválido.")
+    return payload.username

@@ -100,3 +100,12 @@ describe("chatService", () => {
     );
   });
 });
+
+it("sends the admin Bearer token to reuse the API author identity", async () => {
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+  vi.stubGlobal("fetch", fetchMock);
+  await sendChatMessage({ message: "noticias", user: {
+    ...guest, id: "admin:admin", role: "admin", isGuest: false, adminToken: "fixture-token",
+  } });
+  expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer fixture-token");
+});

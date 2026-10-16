@@ -120,3 +120,63 @@ async def test_openai_provider_sends_history_without_storing() -> None:
     assert "previous_response_id" not in options
     assert [item["role"] for item in options["input"]] == ["user", "assistant", "developer", "user"]
     assert (result.input_tokens, result.output_tokens) == (12, 3)
+
+
+def test_admin_chat_requires_the_same_token_as_news_api(monkeypatch, tmp_path):
+    from dataclasses import replace
+
+    from news.auth import create_admin_token
+    from news.config import get_news_settings
+    from news.identity import admin_author_id
+
+    # Fixture de contraseña temporal: nunca se monta ni se lee keys/.
+    password_file = tmp_path / "admin_fixture"
+    password_file.write_text("fixture-only-password", encoding="utf-8")
+    admin_settings = replace(
+        get_news_settings(), admin_username="admin", admin_password_file=password_file
+    )
+    monkeypatch.setattr("assistant.app.get_news_settings", lambda: admin_settings)
+    database = FakeDatabase()
+    database["locations"].documents.append(
+        catalog_location_document({"code": "GT", "name": "Guatemala", "country": "Guatemala"})
+    )
+    payload = {"message": "noticias", "user": {"id": "admin:admin", "displayName": "Admin"}}
+    token = create_admin_token("admin", "fixture-only-password", 3600)
+    with news_client(monkeypatch, database) as client:
+        assert client.post("/chat", json=payload).status_code == 401
+        assert database["users"].documents == []
+        assert (
+            client.post(
+                "/chat", json=payload, headers={"Authorization": "Bearer invalid"}
+            ).status_code
+            == 401
+        )
+        response = client.post("/chat", json=payload, headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert database["users"].documents[0]["firebaseUid"] == "local-admin:admin"
+    assert database["users"].documents[0]["_id"] == admin_author_id("admin")
+    assert database["users"].documents[0]["role"] == "admin"
+
+
+def test_news_entrypoint_loads_root_env_and_selects_news_without_changing_legacy_default(
+    monkeypatch, tmp_path
+):
+    from assistant.news_chat.run import configure_news_environment
+
+    root_env = tmp_path / "root.env"
+    root_env.write_text("CHATBOT_PROVIDER=stub\nNEWS_DB_MODE=local\n", encoding="utf-8")
+    monkeypatch.setattr("assistant.news_chat.run.ROOT_ENV_FILE", root_env)
+    monkeypatch.delenv("MONGODB_CONTEXT_MODE", raising=False)
+    monkeypatch.delenv("CHATBOT_PROVIDER", raising=False)
+    monkeypatch.delenv("NEWS_DB_MODE", raising=False)
+    # Se registra la variable antes de que el entrypoint la escriba, para restaurarla.
+    monkeypatch.setenv("MONGODB_CONTEXT_MODE", "projection")
+    configure_news_environment()
+    get_settings.cache_clear()
+    settings = get_settings()
+    assert settings.news_mode
+    assert settings.prompt_file.name == "news.md"
+    assert settings.provider == "stub"
+    monkeypatch.setenv("MONGODB_CONTEXT_MODE", "projection")
+    get_settings.cache_clear()
+    assert not get_settings().news_mode

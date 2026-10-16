@@ -134,6 +134,7 @@ def get_settings() -> Settings:
     prompt_file = Path(raw_prompt_path) if raw_prompt_path else default_prompt
     if not prompt_file.is_absolute():
         prompt_file = ASSISTANT_ROOT / prompt_file
+    default_prompt_version = "news-v3" if context_mode == "news" else "assistant-v1"
 
     return Settings(
         api_key=_read_api_key(),
@@ -143,8 +144,8 @@ def get_settings() -> Settings:
         allowed_origins=_read_allowed_origins(),
         provider=_read_choice("CHATBOT_PROVIDER", "openai", {"openai", "stub"}),
         prompt_file=prompt_file,
-        prompt_version=os.getenv("CHATBOT_PROMPT_VERSION", "assistant-v1").strip()
-        or "assistant-v1",
+        prompt_version=os.getenv("CHATBOT_PROMPT_VERSION", default_prompt_version).strip()
+        or default_prompt_version,
         mongodb_uri=os.getenv("MONGODB_URI", "").strip() or None,
         mongodb_database=os.getenv("MONGODB_DATABASE", "assistant").strip() or "assistant",
         mongodb_context_mode=context_mode,
@@ -152,9 +153,7 @@ def get_settings() -> Settings:
             "MONGODB_CONTEXT_COLLECTION", "assistant_contexts"
         ).strip()
         or "assistant_contexts",
-        mongodb_user_id_type=_read_choice(
-            "MONGODB_USER_ID_TYPE", "string", {"string", "objectid"}
-        ),
+        mongodb_user_id_type=_read_choice("MONGODB_USER_ID_TYPE", "string", {"string", "objectid"}),
         mongodb_required=_read_bool("MONGODB_REQUIRED", False),
         chat_session_ttl_seconds=_read_positive_int("CHAT_SESSION_TTL_SECONDS", 3600),
         ai_budget_usd=_read_positive_float("NEWS_AI_BUDGET_USD", 20.0),

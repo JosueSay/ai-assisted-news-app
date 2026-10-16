@@ -54,9 +54,9 @@ Compose lo carga automaticamente cuando existe.
 Desde la raíz del proyecto:
 
 ```bash
-make db-init
-make db-seed-catalog
-docker compose up -d --build frontend
+make db-bootstrap
+make db-verify
+docker compose up -d --build news-api chatbot frontend
 ```
 
 Servicios esperados:
@@ -148,3 +148,14 @@ frontend/
 └── tests/
     └── newsService.test.ts
 ```
+
+
+## Contrato de datos
+
+`src/generated/newsContract.ts` se genera desde `backend/news/topics.py` y sus
+enums: no se edita a mano. Desde la raíz ejecutar `make news-contract` y
+`make news-contract-check`. La app conserva todos los topics de cada noticia,
+sus fuentes y estado de verificación, y la declaración de imagen asistida por IA.
+El detalle de una cita se consulta por slug cuando no está cargado en el feed.
+La pestaña Asistente usa `EXPO_PUBLIC_ASSISTANT_API_BASE_URL` (8010); en un
+móvil físico ambas URLs de API deben apuntar a la IP LAN de la computadora.

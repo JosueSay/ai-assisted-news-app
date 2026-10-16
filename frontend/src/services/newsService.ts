@@ -1,4 +1,5 @@
 import type { CategoryId, NewsArticle } from "../types";
+import type { LocationLevel, NewsStatus, SourceType, VerificationStatus } from "../generated/newsContract";
 
 export type NewsFeedResult = {
   articles: NewsArticle[];
@@ -10,7 +11,7 @@ export type NewsLocation = {
   name: string;
   country: string;
   countryCode: string;
-  level: "city" | "region" | "country" | "international";
+  level: LocationLevel;
 };
 
 export type AdminSession = {
@@ -28,15 +29,11 @@ export type AdminNewsCreateInput = {
   topic: CategoryId;
   keywords: string[];
   locationId: string;
-  status: "draft" | "published";
-  verificationStatus:
-    | "confirmed"
-    | "developing"
-    | "insufficient_sources"
-    | "conflicting_sources";
+  status: NewsStatus;
+  verificationStatus: VerificationStatus;
   sourceName?: string;
   sourceUrl?: string;
-  sourceType?: "official" | "media" | "primary_source" | "witness" | "other";
+  sourceType?: SourceType;
   imageUrl?: string;
   imageAlt?: string;
   imageCredit?: string;
@@ -84,6 +81,14 @@ export async function fetchNewsFeedWithStatus(): Promise<NewsFeedResult> {
       error: "No pudimos leer noticias desde MongoDB.",
     };
   }
+}
+
+/** Consulta el detalle aunque la noticia quede fuera de la página del feed. */
+export async function fetchNewsArticleBySlug(slug: string): Promise<NewsArticle | null> {
+  const response = await fetch(`${requireApiBaseUrl()}/news/${encodeURIComponent(slug)}`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error("No pudimos cargar la noticia.");
+  return (await response.json()) as NewsArticle;
 }
 
 export async function loginAdmin(username: string, password: string): Promise<AdminSession> {
@@ -163,7 +168,7 @@ export function getLatestArticles(articles: NewsArticle[] = [], limit = 6) {
 }
 
 export function getArticlesByCategory(category: CategoryId, articles: NewsArticle[] = []) {
-  return articles.filter((article) => article.category === category);
+  return articles.filter((article) => article.topics.includes(category));
 }
 
 export function searchArticles(query: string, articles: NewsArticle[] = []) {
@@ -172,7 +177,7 @@ export function searchArticles(query: string, articles: NewsArticle[] = []) {
 
   return articles.filter((article) => {
     const searchable = normalizeText(
-      `${article.title} ${article.summary} ${article.category} ${article.author}`,
+      `${article.title} ${article.summary} ${article.topics.join(" ")} ${article.author}`,
     );
     return searchable.includes(normalizedQuery);
   });
@@ -180,6 +185,6 @@ export function searchArticles(query: string, articles: NewsArticle[] = []) {
 
 export function getRelatedArticles(article: NewsArticle, articles: NewsArticle[] = []) {
   return articles
-    .filter((candidate) => candidate.category === article.category && candidate.id !== article.id)
+    .filter((candidate) => candidate.topics.some((topic) => article.topics.includes(topic)) && candidate.id !== article.id)
     .slice(0, 3);
 }

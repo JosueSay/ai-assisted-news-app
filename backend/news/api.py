@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import unicodedata
@@ -17,9 +16,15 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
-from .auth import AdminAuthenticationError, create_admin_token, password_matches, verify_admin_token
+from .auth import (
+    AdminAuthenticationError,
+    authorized_admin_username,
+    create_admin_token,
+    password_matches,
+)
 from .config import NewsDatabaseConfigurationError, get_news_settings
 from .database import NewsDatabaseError, get_news_client
+from .identity import admin_author_id, admin_external_id
 from .models import (
     AuditAction,
     ImageType,
@@ -30,12 +35,20 @@ from .models import (
     VerificationStatus,
 )
 from .models.audit_log import AuditLog
-from .models.news import AiAssistance, GeographicScope, Image, News, Source, Verification
+from .models.news import (
+    AiAssistance,
+    GeographicScope,
+    Image,
+    News,
+    Source,
+    Verification,
+)
 from .models.reading_time import compute_reading_time
 from .models.user import Onboarding, User
 from .secret_loader import SecretFileError, load_secret
+from .topics import TOPICS
 
-CATEGORY_IDS = {"actualidad", "tecnologia", "economia", "cultura", "deportes"}
+CATEGORY_IDS = set(TOPICS)
 DEFAULT_ALLOWED_ORIGINS = (
     "http://localhost:8081,"
     "http://127.0.0.1:8081,"
@@ -52,6 +65,20 @@ class ArticleImageResponse(BaseModel):
     credit: str
     sourceUrl: str
     license: str
+    type: ImageType = ImageType.none
+    aiDisclosure: str | None = None
+
+
+class GeographicScopeResponse(BaseModel):
+    level: LocationLevel
+    locationIds: list[str]
+
+
+class VerificationResponse(BaseModel):
+    status: VerificationStatus
+    reviewedBy: str | None = None
+    reviewedAt: datetime | None = None
+    notes: str | None = None
 
 
 class NewsArticleResponse(BaseModel):
@@ -66,6 +93,11 @@ class NewsArticleResponse(BaseModel):
     readingMinutes: int
     source: str
     image: ArticleImageResponse
+    topics: list[str] = Field(default_factory=list)
+    geographicScope: GeographicScopeResponse | None = None
+    verification: VerificationResponse | None = None
+    sources: list[Source] = Field(default_factory=list)
+    aiAssistance: AiAssistance = Field(default_factory=AiAssistance)
 
 
 class HealthResponse(BaseModel):
@@ -149,7 +181,7 @@ class AdminNewsCreateRequest(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def validate_source_pair(self) -> "AdminNewsCreateRequest":
+    def validate_source_pair(self) -> AdminNewsCreateRequest:
         has_source_name = bool(self.sourceName)
         has_source_url = bool(self.sourceUrl)
         if has_source_name != has_source_url:
@@ -192,6 +224,8 @@ def _image_from_document(document: dict[str, Any]) -> ArticleImageResponse:
     credit = image.get("credit") or "Imagen ilustrativa pendiente"
     return ArticleImageResponse(
         src=image.get("url"),
+        type=image.get("type") or ImageType.none,
+        aiDisclosure=image.get("aiDisclosure"),
         alt=image.get("alt") or f"Imagen no disponible para {title}.",
         width=960,
         height=540,
@@ -216,7 +250,11 @@ def _author_name(database, author_id: ObjectId | None) -> str:
     if author_id is None:
         return "Redacción AI News"
     author = database["users"].find_one({"_id": author_id}, {"displayName": 1})
-    return str(author.get("displayName")) if author and author.get("displayName") else "Redacción AI News"
+    return (
+        str(author.get("displayName"))
+        if author and author.get("displayName")
+        else "Redacción AI News"
+    )
 
 
 def document_to_article(database, document: dict[str, Any]) -> NewsArticleResponse:
@@ -234,6 +272,31 @@ def document_to_article(database, document: dict[str, Any]) -> NewsArticleRespon
         readingMinutes=int(document.get("estimatedReadingMinutes") or 1),
         source=str(first_source.get("name") or "Base local"),
         image=_image_from_document(document),
+        topics=document.get("topics") or [],
+        geographicScope=(
+            GeographicScopeResponse(
+                level=document["geographicScope"]["level"],
+                locationIds=[
+                    str(value) for value in document["geographicScope"]["locationIds"]
+                ],
+            )
+            if document.get("geographicScope")
+            else None
+        ),
+        verification=(
+            VerificationResponse(
+                **{
+                    **document["verification"],
+                    "reviewedBy": str(document["verification"]["reviewedBy"])
+                    if document["verification"].get("reviewedBy")
+                    else None,
+                }
+            )
+            if document.get("verification")
+            else None
+        ),
+        sources=[Source.model_validate(source) for source in sources],
+        aiAssistance=AiAssistance.model_validate(document.get("aiAssistance") or {}),
     )
 
 
@@ -248,7 +311,9 @@ def _slugify(value: str) -> str:
 
 def _parse_object_id(value: str, field_name: str) -> ObjectId:
     if not ObjectId.is_valid(value):
-        raise HTTPException(status_code=400, detail=f"{field_name} debe ser ObjectId válido.")
+        raise HTTPException(
+            status_code=400, detail=f"{field_name} debe ser ObjectId válido."
+        )
     return ObjectId(value)
 
 
@@ -266,42 +331,45 @@ def _load_admin_password(settings) -> str:
 
 
 def _authorized_admin_username(request: Request) -> str:
-    settings = request.app.state.news_settings
-    authorization = request.headers.get("Authorization", "")
-    prefix = "Bearer "
-    if not authorization.startswith(prefix):
-        raise HTTPException(status_code=401, detail="Token admin requerido.")
-
-    token = authorization[len(prefix):].strip()
-    password = _load_admin_password(settings)
     try:
-        payload = verify_admin_token(token, password)
+        return authorized_admin_username(
+            request.headers.get("Authorization", ""), request.app.state.news_settings
+        )
     except AdminAuthenticationError as error:
-        raise HTTPException(status_code=401, detail="Token admin inválido.") from error
-    if payload.username != settings.admin_username:
-        raise HTTPException(status_code=401, detail="Token admin inválido.")
-    return payload.username
+        raise HTTPException(
+            status_code=401, detail="Token admin inválido o requerido."
+        ) from error
+    except SecretFileError as error:
+        raise HTTPException(
+            status_code=503, detail="La autenticación admin no está configurada."
+        ) from error
 
 
 def _stable_admin_author_id(username: str) -> ObjectId:
-    digest = hashlib.sha1(f"news-admin:{username}".encode("utf-8")).hexdigest()
-    return ObjectId(digest[:24])
+    return admin_author_id(username)
 
 
 def _ensure_admin_author(database, username: str, location_id: ObjectId) -> ObjectId:
     now = datetime.now(timezone.utc)
     author_id = _stable_admin_author_id(username)
-    existing = database["users"].find_one({"_id": author_id}, {"createdAt": 1})
-    created_at = existing.get("createdAt", now) if existing else now
+    existing = database["users"].find_one({"firebaseUid": admin_external_id(username)})
+    if existing:
+        database["users"].update_one(
+            {"_id": existing["_id"]}, {"$set": {"updatedAt": now, "lastLoginAt": now}}
+        )
+        return existing["_id"]
+    created_at = now
     user = User(
         _id=author_id,
-        firebaseUid=f"local-admin:{username}",
+        firebaseUid=admin_external_id(username),
         email=f"{username}@local.admin",
         displayName="Admin local",
         photoUrl="",
         role=UserRole.admin,
         simulatedLocationId=location_id,
-        onboarding=Onboarding(completed=True, completedAt=created_at, selectedTopics=[]),
+        onboarding=Onboarding(
+            completed=True, completedAt=created_at, selectedTopics=[]
+        ),
         createdAt=created_at,
         updatedAt=now,
         lastLoginAt=now,
@@ -314,7 +382,9 @@ def _ensure_admin_author(database, username: str, location_id: ObjectId) -> Obje
     return author_id
 
 
-def _source_from_request(payload: AdminNewsCreateRequest, now: datetime) -> list[Source]:
+def _source_from_request(
+    payload: AdminNewsCreateRequest, now: datetime
+) -> list[Source]:
     if not payload.sourceName or not payload.sourceUrl:
         return []
     return [
@@ -360,7 +430,9 @@ def _create_news_document(
         {"level": 1},
     )
     if not location:
-        raise HTTPException(status_code=400, detail="La ubicación seleccionada no existe.")
+        raise HTTPException(
+            status_code=400, detail="La ubicación seleccionada no existe."
+        )
 
     now = datetime.now(timezone.utc)
     author_id = _ensure_admin_author(database, admin_username, location_id)
@@ -369,12 +441,18 @@ def _create_news_document(
     published_at = now if payload.status == NewsStatus.published else None
     slug = _slugify(payload.slug or payload.title)
     topic = payload.topic.strip().lower()
-    keywords = sorted({item.strip().lower() for item in payload.keywords if item.strip()})
+    keywords = sorted(
+        {item.strip().lower() for item in payload.keywords if item.strip()}
+    )
     if topic not in keywords:
         keywords.insert(0, topic)
 
     raw_level = location.get("level") or LocationLevel.country.value
-    location_level = raw_level if isinstance(raw_level, LocationLevel) else LocationLevel(str(raw_level))
+    location_level = (
+        raw_level
+        if isinstance(raw_level, LocationLevel)
+        else LocationLevel(str(raw_level))
+    )
 
     news = News(
         slug=slug,
@@ -408,7 +486,9 @@ def _create_news_document(
     try:
         database["news"].insert_one(document)
     except DuplicateKeyError as error:
-        raise HTTPException(status_code=409, detail="Ya existe una noticia con ese slug.") from error
+        raise HTTPException(
+            status_code=409, detail="Ya existe una noticia con ese slug."
+        ) from error
 
     audit = AuditLog(
         actorId=author_id,
@@ -516,7 +596,9 @@ def create_app() -> FastAPI:
         return document_to_article(database, document)
 
     @application.post("/admin/login", response_model=AdminLoginResponse)
-    async def admin_login(payload: AdminLoginRequest, request: Request) -> AdminLoginResponse:
+    async def admin_login(
+        payload: AdminLoginRequest, request: Request
+    ) -> AdminLoginResponse:
         settings = request.app.state.news_settings
         expected_password = _load_admin_password(settings)
         if payload.username != settings.admin_username or not password_matches(
@@ -536,7 +618,9 @@ def create_app() -> FastAPI:
             username=payload.username,
         )
 
-    @application.post("/admin/news", response_model=NewsArticleResponse, status_code=201)
+    @application.post(
+        "/admin/news", response_model=NewsArticleResponse, status_code=201
+    )
     async def admin_create_news(
         payload: AdminNewsCreateRequest,
         request: Request,

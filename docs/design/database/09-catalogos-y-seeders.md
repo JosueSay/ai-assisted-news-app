@@ -118,3 +118,13 @@ Convertir los strings libres de `selectedTopics`, `inferredInterests[].topic` y
 funcional significativo del contrato actual. El catálogo existe y los seeders lo
 usan, pero los modelos no lo fuerzan todavía. Esa decisión queda para un loop
 futuro con autorización explícita.
+
+
+## Consumidores del catálogo
+
+API, chat y frontend utilizan este catálogo. `news.presentation` aporta etiquetas;
+`news.export_contract` genera los tipos y categorías Expo mediante
+`make news-contract`, con comprobación `make news-contract-check`. No modifica los
+valores de `TOPICS` ni las reglas de persistencia. Las pruebas de integración usan
+las 32 fixtures de `demo_news.py`. Ver
+[contrato compartido](../../architecture/contrato-compartido-noticias.md).
