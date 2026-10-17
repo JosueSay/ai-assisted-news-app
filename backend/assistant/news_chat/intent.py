@@ -37,7 +37,14 @@ RECENT_PHRASES = (
     "titulares",
 )
 LOCAL_PHRASES = ("mi pais", "mi zona", "mi region", "cerca de mi", "donde estoy", "local")
-COUNTRY_GROUP_PHRASES = ("por pais", "por paises", "cada pais", "segun el pais")
+COUNTRY_GROUP_PHRASES = (
+    "por pais",
+    "por paises",
+    "cada pais",
+    "segun el pais",
+    "de que pais",
+    "de que paises son",
+)
 COUNT_PHRASES = (
     "cuantas noticias",
     "cuantos articulos",
@@ -199,7 +206,7 @@ def classify_message(message: str, *, has_news_context: bool) -> ClassifiedQuery
         )
     )
     wants_user_location = _contains_phrase(text, LOCAL_PHRASES)
-    group_by_country = any(_contains_word(text, phrase) for phrase in COUNTRY_GROUP_PHRASES)
+    group_by_country = any(_contains_phrase(text, (phrase,)) for phrase in COUNTRY_GROUP_PHRASES)
     wants_count = any(_contains_word(text, phrase) for phrase in COUNT_PHRASES)
     terms = tuple(
         dict.fromkeys(

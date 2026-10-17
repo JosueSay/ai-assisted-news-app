@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+from bson import ObjectId
 from fastapi.testclient import TestClient
 from news.seed_catalog import catalog_location_document
 
@@ -70,10 +71,10 @@ def test_news_mode_reports_missing_api_key(monkeypatch) -> None:
 
     with news_client(monkeypatch, database, provider="openai") as client:
         # Sin noticias no se necesita la IA: responde igual.
-        empty = client.post("/chat", json={"message": "noticias", "user": USER})
+        empty = client.post("/chat", json={"message": "resume las noticias", "user": USER})
         database["news"].documents.append(
             {
-                "_id": "n1",
+                "_id": ObjectId(),
                 "slug": "n1",
                 "title": "Noticia",
                 "summary": "Resumen",
@@ -82,7 +83,7 @@ def test_news_mode_reports_missing_api_key(monkeypatch) -> None:
                 "sources": [],
             }
         )
-        response = client.post("/chat", json={"message": "noticias", "user": USER})
+        response = client.post("/chat", json={"message": "resume las noticias", "user": USER})
 
     assert empty.status_code == 200
     assert response.status_code == 503
@@ -168,6 +169,7 @@ def test_news_entrypoint_loads_root_env_and_selects_news_without_changing_legacy
     monkeypatch.setattr("assistant.news_chat.run.ROOT_ENV_FILE", root_env)
     monkeypatch.delenv("MONGODB_CONTEXT_MODE", raising=False)
     monkeypatch.delenv("CHATBOT_PROVIDER", raising=False)
+    monkeypatch.delenv("CHATBOT_PROMPT_FILE", raising=False)
     monkeypatch.delenv("NEWS_DB_MODE", raising=False)
     # Se registra la variable antes de que el entrypoint la escriba, para restaurarla.
     monkeypatch.setenv("MONGODB_CONTEXT_MODE", "projection")

@@ -1,21 +1,23 @@
-# Arquitectura pendiente del chat: JEV + CODE + LLM
+# Arquitectura conversacional del chat: JEV + CODE + LLM
 
-Fecha de revisión: 2026-10-15. Estado: **plan de siguientes pasos; no implementado**.
+Fecha de revisión: 2026-10-17. Estado: **implementado y verificado**.
 
-El chat ya comparte DB, modelos y catálogos con AI News y puede consultar MongoDB
-local o Atlas. Aún no implementa de forma completa el diagrama conversacional
-JEV + CODE + LLM aportado por el usuario. Este documento identifica las piezas
-existentes, las brechas y el orden propuesto para completarlo.
+El chat comparte DB, modelos y catálogos con AI News y consulta MongoDB local o
+Atlas. Las seis fases de esta arquitectura están implementadas en modo news. Por
+decisión del usuario, JEV se implementa como routers internos deterministas en
+Python: no se agregó framework, servicio ni llamada de IA para clasificar o enrutar.
 
-La autorización de este loop es documental. Los siguientes loops requieren su
-instrucción de implementación; este documento no crea funcionalidades ni aprueba
-cambios del esquema de MongoDB.
+La implementación no modifica el esquema, colecciones, índices, seeders, TTL ni
+contrato HTTP persistido. Las secciones que describen el baseline y las brechas
+se refieren al estado previo al loop del 2026-10-17.
 
 ## Fuentes y alcance
 
 - Diagrama aportado en la conversación: alcance `OUT_OF_SCOPE`, `PARTIAL` y
   `BUSINESS`; enrutamiento parcial; enrutamiento de capacidad; catálogo con
   `capability`, `execution`, `resource` y `presentation`; ejecución CODE o LLM.
+- Decisión del usuario (2026-10-17): JEV es un router interno determinista, sin
+  dependencia o proveedor externo.
 - [Contrato implementado de noticias](contrato-compartido-noticias.md).
 - [Diseño aprobado de DB](../design/database/README.md) y
   [criterios de chat y costos](../design/database/04-criterios-de-chat-y-costos.md).
@@ -25,12 +27,12 @@ Los modelos, esquema y seeders aprobados en `4228506` siguen siendo la fuente de
 verdad para los consumidores integrados desde `c756e4f`. La propuesta histórica de
 `docs/architecture/README.md` no sustituye ese diseño.
 
-**JEV se conserva como etiqueta del diagrama.** No se encontró un componente con
-ese contrato en `backend/assistant/news_chat/`; no se presupone qué motor,
-biblioteca o servicio representa. Esa elección se resuelve antes de implementar
-los routers, sin introducir una dependencia externa automáticamente.
+**JEV** se conserva como etiqueta del diagrama y se materializa con
+`backend/assistant/news_chat/routing.py`. El alcance, las solicitudes parciales y
+las capacidades se resuelven con reglas controladas y pruebas; el catálogo es
+cerrado y ningún texto de usuario/modelo selecciona código arbitrario.
 
-## Punto de partida verificado
+## Estado previo a la implementación (2026-10-15)
 
 - API y chat reutilizan `news.config`, `news.models`, los 14 topics y `locations`.
 - El usuario confirmó el funcionamiento local y luego el uso de Atlas desde su PC.
@@ -52,7 +54,7 @@ los routers, sin introducir una dependencia externa automáticamente.
 Usar Atlas desde la PC no equivale a publicar la aplicación en internet. El despliegue
 público y la autenticación definitiva quedan fuera de esta secuencia del diagrama.
 
-## Flujo actual
+## Flujo previo a la implementación (2026-10-15)
 
 ```mermaid
 flowchart TD
@@ -73,13 +75,12 @@ flowchart TD
     META --> OUTPUT["Respuesta HTTP al frontend"]
 ```
 
-El nodo de metadatos registra `aiUsage` únicamente cuando corresponde a una
-llamada real; no representa un registro de consumo para CODE, stub o template.
-Este flujo describe lo implementado, no la arquitectura objetivo.
+Este diagrama describe el baseline antes del loop, no el flujo vigente. Incluso en
+este baseline, `aiUsage` solo se registraba por llamadas reales a IA.
 
-## Brechas frente al diagrama
+## Brechas detectadas antes de implementar
 
-| Bloque del diagrama | Estado actual | Pendiente concreto |
+| Bloque del diagrama | Estado en baseline | Trabajo requerido en ese momento |
 | --- | --- | --- |
 | `STATE: INPUT + CONTEXT` | Parcial: request, usuario, sesión y contexto se construyen en varios puntos. | Contrato interno común para el turno, con procedencia de datos y límites de memoria explícitos. |
 | `BUSINESS_CONTEXT` | Dominio distribuido entre prompt, constantes y reglas. | Contexto de negocio común para clasificación, routing y presentación. |
@@ -97,10 +98,11 @@ Este flujo describe lo implementado, no la arquitectura objetivo.
 | Conversación y oferta anterior | Seguimientos resueltos con reglas e historial. | Integrarlos con la capacidad y aclaración elegidas, conservando las regresiones existentes. |
 | Pruebas del flujo completo | Hay pruebas de comportamientos, DB y continuidad. | Verificar los nodos/rutas del diagrama y la decisión de ejecución, no solo el texto final. |
 
-No basta con modificar el prompt: alcance, capacidad, consultas y ejecución
-necesitan contratos verificables en el backend.
+No bastaba con modificar el prompt: alcance, capacidad, consultas y ejecución
+necesitaban contratos verificables en el backend. La resolución implementada se
+describe a continuación; esta tabla conserva el diagnóstico histórico.
 
-## Flujo objetivo de los siguientes loops
+## Flujo implementado
 
 ```mermaid
 flowchart TD
@@ -135,40 +137,41 @@ persistencia del turno acompañan el flujo. No se dibujan como nuevas capacidade
 ni autorizan al modelo a consultar MongoDB directamente. Una capacidad desconocida
 debe producir fallback o aclaración, nunca ejecutar un handler arbitrario.
 
-## Propuesta inicial del catálogo
+## Catálogo implementado
 
-Los siguientes identificadores son **propuestos**, todavía no contratos implementados.
-Reutilizan comportamientos existentes; no añaden funcionalidades al producto.
+El catálogo versionado en código reutiliza el comportamiento existente; no añade
+funcionalidades al producto. `news.search` conserva la búsqueda libre existente.
 
-| Capacidad propuesta | Intención persistida existente | Ejecución propuesta | Resource existente o base para el handler |
-| --- | --- | --- | --- |
-| `news.list_recent` | `recent_news` | CODE | `published_news_matching` |
-| `news.list_by_country` | `regional_news` | CODE | `locations` + filtros geográficos |
-| `news.list_by_topic` | `topic_news` | CODE | `news.topics` + filtros de topics |
-| `news.detail` | `news_detail` | CODE | `find_published_news` |
-| `news.count` | `recent_news`, `regional_news` o `topic_news`, según filtros | CODE | `count_news` |
-| `news.group_by_country` | `regional_news` | CODE | Catálogo y conteos de publicaciones por país |
-| `news.summarize` | `summarize` | LLM | Selección de publicaciones y contexto autorizado |
-| `news.explain` | `explain` | LLM | Publicaciones/citas del turno y contexto autorizado |
+| Capacidad | Intención persistida existente | Ejecución | Resource registrado | Presentación |
+| --- | --- | --- | --- | --- |
+| `news.list_recent` | `recent_news` | CODE | `recent_published_news` | `listing` |
+| `news.list_by_country` | `regional_news` | CODE | `published_news_matching` | `listing` |
+| `news.list_by_topic` | `topic_news` | CODE | `published_news_matching` | `listing` |
+| `news.detail` | `news_detail` | CODE | `find_published_news` | `detail` |
+| `news.count` | `recent_news`, `regional_news` o `topic_news`, según filtros | CODE | `count_news` | `count` |
+| `news.group_by_country` | `regional_news` | CODE | `group_news_by_country` | `country_groups` |
+| `news.summarize` | `summarize` | LLM | `published_news_context` | `summary` |
+| `news.explain` | `explain` | LLM | `published_news_context` | `explanation` |
+| `news.search` | sin enum nuevo; intención derivada del resultado | CODE | `search_published_news` | `search` |
 
-`presentation` referenciaría un formateador registrado, no código recibido del modelo.
-El rechazo y la ayuda de fallback usarían plantillas derivadas del catálogo.
-La estructura mínima puede vivir versionada en código del modo news; **no se
-propone una colección MongoDB nueva**. Su ubicación y formato se concretan en el primer loop.
+`presentation` referencia una presentación registrada, no código recibido del
+modelo. El rechazo usa plantilla y las peticiones parciales añaden una nota fija
+al resultado atendible. El catálogo y los routers viven versionados en el modo
+news; no hay colección nueva.
 
 No incluir búsquedas por autor, publicación de noticias, NOVU, transferencias,
 ingesta ni filtros nuevos solo porque aparezcan en una sugerencia del modelo.
 Cada ampliación requiere definición y autorización independientes.
 
-## Orden de implementación propuesto
+## Fases implementadas
 
 ### 1. Contratos del turno y catálogo
 
-Loop sugerido: `chat-capability-contracts`.
+Fase `chat-capability-contracts`.
 
 - Definir el estado interno del turno, `BUSINESS_CONTEXT`, configuración de
   capacidad y resultado de routing, separados de los modelos persistidos.
-- Acordar la interpretación de JEV y la matriz CODE/LLM antes de conectarlos al servicio.
+- JEV quedó acordado como routing interno determinista y la matriz CODE/LLM quedó registrada en el catálogo.
 - Registrar handlers y presentaciones existentes con nombres estables y validados.
 - Mantener la correspondencia con los enums actuales de `news.models`.
 - Aceptación: catálogo sin duplicados, recursos/presentaciones registrados y ninguna
@@ -176,7 +179,7 @@ Loop sugerido: `chat-capability-contracts`.
 
 ### 2. Clasificación de alcance
 
-Loop sugerido: `chat-scope-routing`; depende del anterior.
+Fase `chat-scope-routing`; depende de los contratos.
 
 - Producir los tres resultados del diagrama antes del routing de capacidad.
 - Distinguir una solicitud ajena al dominio de una solicitud válida sin resultados.
@@ -188,7 +191,7 @@ Loop sugerido: `chat-scope-routing`; depende del anterior.
 
 ### 3. Peticiones parciales y fallback
 
-Loop sugerido: `chat-partial-routing`; depende de alcance y catálogo.
+Fase `chat-partial-routing`; depende de alcance y catálogo.
 
 - Identificar qué fragmento de una petición mixta pertenece a noticias.
 - Enrutar la parte atendible a negocio y explicar brevemente la parte no atendible.
@@ -200,7 +203,7 @@ Loop sugerido: `chat-partial-routing`; depende de alcance y catálogo.
 
 ### 4. Routing de capacidad y parámetros
 
-Loop sugerido: `chat-capability-routing`; depende de los tres anteriores.
+Fase `chat-capability-routing`; depende de las fases anteriores.
 
 - Resolver una capacidad del catálogo desde el estado del turno y validar su salida.
 - Asociar filtros, noticia seleccionada, ordinales y referencias previas a parámetros
@@ -212,7 +215,7 @@ Loop sugerido: `chat-capability-routing`; depende de los tres anteriores.
 
 ### 5. Dispatcher CODE/LLM y presentación común
 
-Loop sugerido: `chat-capability-execution`; depende del catálogo y routing.
+Fase `chat-capability-execution`; depende del catálogo y routing.
 
 - Sustituir decisiones dispersas por un dispatcher basado en `execution`.
 - CODE aplica el resource registrado y su presentación; LLM obtiene datos mediante
@@ -225,7 +228,7 @@ Loop sugerido: `chat-capability-execution`; depende del catálogo y routing.
 
 ### 6. Integración del flujo completo con memoria y verificación
 
-Loop sugerido: `chat-architecture-verification`; depende de las cinco fases.
+Fase `chat-architecture-verification`; integra las fases anteriores.
 
 - Integrar el nuevo flujo con `chatSessions.messages` y las reglas de sesión actuales.
 - Probar las rutas del diagrama de extremo a extremo con proveedores falsos y MongoDB
@@ -236,17 +239,31 @@ Loop sugerido: `chat-architecture-verification`; depende de las cinco fases.
 - Aceptación: suite normal sin Atlas ni keys, comandos repetibles y una prueba manual
   equivalente para MongoDB local y Atlas. Atlas queda separado de los tests normales.
 
-## Decisiones que deben quedar explícitas antes de implementar
+## Decisiones resueltas y límites
 
 | Decisión | Propuesta o límite para el siguiente loop |
 | --- | --- |
-| Qué representa JEV y dónde se ejecuta | Resolverlo con el propietario del diagrama; no asumir un framework o proveedor. |
-| Ubicación y formato del catálogo | Preferir un registro versionado en código del modo news; no crear DB/ODM nuevos. |
-| Matriz de ejecución | Revisar la tabla propuesta, especialmente sacar los listados puramente informativos del LLM. |
-| Semántica de PARTIAL y ambigüedad | Definir ejemplos y salidas antes de implementar heurísticas. |
-| Memoria de una acción ofrecida | Reutilizar mensajes/metadatos actuales; si se requiere persistir estado nuevo, pedir decisión de DB y actualizar su diseño primero. |
-| Trazas del nuevo routing | Contratos internos y diagnósticos de prueba; añadir campos persistidos o telemetría de producción requiere diseño explícito. |
-| Uso de IA para clasificación/routing | Cualquier llamada real cuenta para el presupuesto y debe ser compatible con los criterios aprobados de `aiUsage`. No confundirla con trabajo del agente. |
+| Qué representa JEV y dónde se ejecuta | Resuelto por el usuario: routers internos deterministas en Python, sin dependencia externa. |
+| Ubicación y formato del catálogo | Resuelto: `news_chat/capabilities.py`, versionado en código; sin DB/ODM nuevos. |
+| Matriz de ejecución | CODE para listados, detalle, búsqueda, conteos y grupos por país; LLM solo para resumen y explicación. |
+| Semántica de PARTIAL y ambigüedad | Reglas deterministas, patrones de alcance delimitados, limpieza de la parte ajena y fallback seguro. La búsqueda libre preservada consulta solo publicaciones y puede terminar en `unsupported`. |
+| Memoria de una acción ofrecida | Se deriva de mensajes/citas de la sesión validada; no se añade estado persistido. |
+| Trazas del nuevo routing | `TurnState` es interno y no persistido; no se añade telemetría de producción. |
+| Uso de IA para clasificación/routing | Ninguna llamada. Cada llamada LLM de resumen/explicación mantiene el registro existente en `aiUsage`. |
+
+### Comportamiento del router de alcance
+
+El router distingue solicitudes explícitas fuera de noticias (acciones de
+transferencia/pago, recetas, pronóstico del tiempo y peticiones médicas directas)
+de consultas del catálogo y contexto de noticia. Si una frase combina una consulta
+de noticias con uno de esos fragmentos, conserva el texto y filtros de noticias;
+si la capacidad usa LLM, solo le envía el texto atendible. El backend agrega una
+nota fija indicando el límite.
+El router es determinista, no pretende comprender cualquier intención abierta:
+texto libre no clasificado como una acción ajena usa `news.search`, limitado a las
+200 publicaciones recientes; sin coincidencias publicadas responde con plantilla
+`unsupported`. No se acepta código, recursos, consultas MongoDB ni nombres de
+capacidad desde el usuario o el modelo.
 
 ## Restricciones que todos los loops deben preservar
 
@@ -263,17 +280,28 @@ Loop sugerido: `chat-architecture-verification`; depende de las cinco fases.
 
 ## Criterios de cierre de la arquitectura
 
-- [ ] Cada bloque y transición del diagrama tiene un contrato y pruebas identificables.
-- [ ] Alcance, petición parcial y selección de capacidad son etapas separadas.
-- [ ] Routers y configuración utilizan el mismo catálogo; la ayuda no promete capacidades inexistentes.
-- [ ] `execution`, `resource` y `presentation` determinan la ruta, con validación antes de ejecutar.
-- [ ] Las dos ramas aplican presentación por código y generan metadatos coherentes con la ejecución real.
-- [ ] «De qué países son», «resúmelas», «y de México», ordinales y aceptaciones conservan su selección o piden aclaración.
-- [ ] Sigue siendo posible probar CODE sin credenciales y LLM con proveedores falsos.
-- [ ] Esquema/modelos/seeders permanecen sincronizados con el diseño aprobado.
-- [ ] Se documenta qué rutas pasaron pruebas automáticas y cuáles validó manualmente el usuario.
-- [ ] La documentación deja de marcar el objetivo como pendiente solo después de verificar esas condiciones.
+- [x] Cada bloque y transición implementada tiene contrato y pruebas identificables.
+- [x] Alcance, petición parcial y selección de capacidad son etapas separadas.
+- [x] Routers y configuración utilizan el mismo catálogo cerrado; fallback no promete capacidades arbitrarias.
+- [x] `execution`, `resource` y `presentation` determinan el flujo; se validan contra registros cerrados.
+- [x] Las rutas CODE y LLM comparten las presentaciones del backend y persisten metadatos coherentes.
+- [x] Seguimientos, grupos por país, ordinales y citas reutilizan solo la selección publicada de la sesión válida.
+- [x] CODE se prueba sin credenciales; LLM con proveedor falso.
+- [x] Esquema/modelos/seeders permanecen sincronizados con el diseño aprobado.
+- [x] Las verificaciones automáticas y sus límites están registrados en el handoff de implementación.
+- [x] La documentación refleja el estado implementado.
 
-**Próximo paso recomendado:** comenzar por `chat-capability-contracts`, definiendo
-el contrato del estado y el catálogo. La conexión a Atlas ya funciona; no es
-necesario reconstruir la infraestructura de DB para iniciar ese trabajo.
+## Resultado de implementación
+
+- Contratos y catálogo: `news_chat/capabilities.py` y `news_chat/routing.py`.
+- Ejecución y presentación: `news_chat/service.py`; los recursos registrados son
+  seleccionados por clave cerrada, las capacidades CODE no crean proveedor ni
+  escriben `aiUsage`, y resumen/explicación son las únicas rutas LLM.
+- Continuidad: `news_chat/conversation.py` conserva citas, filtros y referencias;
+  «¿de qué países son?» agrupa por código sobre publicaciones citadas.
+- Tests: `tests/test_news_routing.py` y suites de chat/conversación/consultas.
+- Esquema: sin cambios; siguen vigentes las siete colecciones, TTL 3600 s,
+  presupuesto USD 20 y requisito de citar solo noticias `published`.
+
+El detalle de comandos, resultados y decisiones de cierre está en
+[`08-chat-architecture-implementation-result`](../../backend/loops/handoffs/08-chat-architecture-implementation-result.md).

@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -8,10 +8,10 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
-import { Bot, MapPin, Send, X } from "lucide-react-native";
+import { Bot, Clock3, MapPin, MessageCircle, Plus, Send, X } from "lucide-react-native";
 
-import { AppButton } from "../../components/AppButton";
 import {
   chatExternalUserId,
   isSessionActive,
@@ -23,6 +23,15 @@ import {
 import { fetchLocations, type NewsLocation } from "../../services/newsService";
 import { colors, fonts, layout, radii, spacing } from "../../theme";
 import type { AppUser, NewsArticle } from "../../types";
+import {
+  articleOpeningPrompt,
+  CHAT_HISTORY_STORAGE_KEY,
+  conversationTitle,
+  LEGACY_CHAT_STORAGE_KEY,
+  readConversations,
+  type ChatConversation,
+  type ChatEntry,
+} from "./chatHistory";
 
 type Props = {
   user: AppUser;
@@ -31,19 +40,12 @@ type Props = {
   onOpenArticle: (slug: string) => void;
 };
 
-type ChatEntry =
-  | { id: string; role: "user"; content: string }
-  | { id: string; role: "assistant"; message: ChatAssistantMessage };
-
-type StoredChat = {
-  userKey: string;
-  sessionId: string;
-  expiresAt: string;
-  entries: ChatEntry[];
-};
-
-const CHAT_STORAGE_KEY = "ai-news:chat-session";
 const LOCATION_STORAGE_KEY = "ai-news:chat-location";
+
+type ActiveConversation = Omit<ChatConversation, "sessionId" | "expiresAt"> & {
+  sessionId: string | null;
+  expiresAt: string | null;
+};
 
 const STRATEGY_LABELS: Record<ChatStrategy, string> = {
   database_query: "Datos de la base",
@@ -84,29 +86,45 @@ function nextEntryId() {
 
 export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle }: Props) {
   const userKey = chatExternalUserId(user);
-  const [entries, setEntries] = useState<ChatEntry[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const { width } = useWindowDimensions();
+  const isMobile = width < 768;
+  const [conversations, setConversations] = useState<ChatConversation[]>([]);
+  const [activeConversation, setActiveConversation] = useState<ActiveConversation | null>(null);
+  const [isHistoryLoaded, setIsHistoryLoaded] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [locations, setLocations] = useState<NewsLocation[]>([]);
   const [locationId, setLocationId] = useState<string | null>(null);
   const [locationsError, setLocationsError] = useState<string | null>(null);
+  const messageScroll = useRef<ScrollView>(null);
+  const lastContextArticleId = useRef<string | null>(null);
+  const sending = useRef(false);
+  const entries = activeConversation?.entries ?? [];
 
   useEffect(() => {
     let active = true;
-    AsyncStorage.getItem(CHAT_STORAGE_KEY)
-      .then((raw) => {
-        if (!active || !raw) return;
-        const stored = JSON.parse(raw) as StoredChat;
-        if (stored.userKey === userKey && isSessionActive(stored.expiresAt)) {
-          setSessionId(stored.sessionId);
-          setExpiresAt(stored.expiresAt);
-          setEntries(stored.entries);
+    setConversations([]);
+    setActiveConversation(null);
+    setIsHistoryLoaded(false);
+    Promise.all([
+      AsyncStorage.getItem(CHAT_HISTORY_STORAGE_KEY),
+      AsyncStorage.getItem(LEGACY_CHAT_STORAGE_KEY),
+    ])
+      .then(([raw, legacyRaw]) => {
+        if (!active) return;
+        const restored = readConversations(raw, legacyRaw, userKey);
+        setConversations(restored);
+        setActiveConversation(restored[0] ?? null);
+        setIsHistoryLoaded(true);
+        if (!raw && restored.length > 0) {
+          AsyncStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(restored)).catch(() => undefined);
         }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (active) setIsHistoryLoaded(true);
+      });
     AsyncStorage.getItem(LOCATION_STORAGE_KEY)
       .then((stored) => {
         if (active && stored) setLocationId(stored);
@@ -125,16 +143,18 @@ export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle
   }, [userKey]);
 
   const persistChat = useCallback(
-    (nextSessionId: string, nextExpiresAt: string, nextEntries: ChatEntry[]) => {
-      const stored: StoredChat = {
-        userKey,
-        sessionId: nextSessionId,
-        expiresAt: nextExpiresAt,
-        entries: nextEntries,
-      };
-      AsyncStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(stored)).catch(() => undefined);
+    (conversation: ChatConversation) => {
+      const now = Date.now();
+      const next = [
+        conversation,
+        ...conversations.filter(
+          (item) => item.id !== conversation.id && Date.parse(item.expiresAt) > now,
+        ),
+      ].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+      setConversations(next);
+      AsyncStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(next)).catch(() => undefined);
     },
-    [userKey],
+    [conversations],
   );
 
   const selectLocation = useCallback((nextLocationId: string) => {
@@ -143,32 +163,49 @@ export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle
   }, []);
 
   const startNewConversation = useCallback(() => {
-    setEntries([]);
-    setSessionId(null);
-    setExpiresAt(null);
+    setActiveConversation({
+      id: `draft-${nextEntryId()}`,
+      userKey,
+      sessionId: null,
+      expiresAt: null,
+      title: "Nueva conversación",
+      updatedAt: new Date().toISOString(),
+      entries: [],
+    });
+    setIsHistoryOpen(false);
+    setDraft("");
     setError(null);
-    AsyncStorage.removeItem(CHAT_STORAGE_KEY).catch(() => undefined);
-  }, []);
+  }, [userKey]);
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, conversationOverride?: ActiveConversation) => {
       const message = text.trim();
-      if (!message || isSending) return;
+      if (!isHistoryLoaded || !message || sending.current) return;
 
-      const activeSession = isSessionActive(expiresAt) ? sessionId : null;
+      const target = conversationOverride ?? activeConversation ?? {
+        id: `draft-${nextEntryId()}`,
+        userKey,
+        sessionId: null,
+        expiresAt: null,
+        title: "Nueva conversación",
+        updatedAt: new Date().toISOString(),
+        entries: [],
+      };
+      const activeSession = isSessionActive(target.expiresAt) ? target.sessionId : null;
       // Una sesión vencida empieza una conversación nueva, igual que en el servidor.
-      const baseEntries = activeSession ? entries : [];
+      const baseEntries = activeSession ? target.entries : [];
       const userEntry: ChatEntry = { id: nextEntryId(), role: "user", content: message };
-      setEntries([...baseEntries, userEntry]);
+      setActiveConversation({ ...target, entries: [...baseEntries, userEntry] });
       setDraft("");
       setError(null);
+      sending.current = true;
       setIsSending(true);
       try {
         const reply = await sendChatMessage({
           message,
           user,
           sessionId: activeSession,
-          newsId: contextArticle?.id ?? null,
+          newsId: baseEntries.length === 0 ? target.contextArticleId ?? null : null,
           locationId,
         });
         const nextEntries: ChatEntry[] = [
@@ -176,107 +213,233 @@ export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle
           userEntry,
           { id: nextEntryId(), role: "assistant", message: reply.message },
         ];
-        setEntries(nextEntries);
-        setSessionId(reply.sessionId);
-        setExpiresAt(reply.expiresAt);
+        const saved: ChatConversation = {
+          id: activeSession ? target.id : reply.sessionId,
+          userKey,
+          sessionId: reply.sessionId,
+          expiresAt: reply.expiresAt,
+          title: conversationTitle(nextEntries, target.contextTitle),
+          updatedAt: reply.message.createdAt,
+          entries: nextEntries,
+          contextArticleId: target.contextArticleId,
+          contextTitle: target.contextTitle,
+        };
+        setActiveConversation(saved);
         if (!locationId) setLocationId(reply.locationId);
-        persistChat(reply.sessionId, reply.expiresAt, nextEntries);
+        persistChat(saved);
       } catch (sendError) {
-        setEntries(baseEntries);
+        setActiveConversation({ ...target, entries: baseEntries });
         setDraft(message);
         setError(sendError instanceof Error ? sendError.message : "El asistente no pudo responder.");
       } finally {
+        sending.current = false;
         setIsSending(false);
       }
     },
-    [contextArticle, entries, expiresAt, isSending, locationId, persistChat, sessionId, user],
+    [activeConversation, isHistoryLoaded, locationId, persistChat, user, userKey],
   );
 
-  const suggestions = contextArticle ? ARTICLE_SUGGESTIONS : GENERAL_SUGGESTIONS;
+  useEffect(() => {
+    if (!isHistoryLoaded) return;
+    if (!contextArticle) {
+      lastContextArticleId.current = null;
+      return;
+    }
+    if (lastContextArticleId.current === contextArticle.id) return;
+    lastContextArticleId.current = contextArticle.id;
+    const contextualConversation: ActiveConversation = {
+      id: `draft-${nextEntryId()}`,
+      userKey,
+      sessionId: null,
+      expiresAt: null,
+      title: contextArticle.title,
+      updatedAt: new Date().toISOString(),
+      entries: [],
+      contextArticleId: contextArticle.id,
+      contextTitle: contextArticle.title,
+    };
+    setActiveConversation(contextualConversation);
+    setIsHistoryOpen(false);
+    void send(articleOpeningPrompt(contextArticle.title), contextualConversation);
+  }, [contextArticle, isHistoryLoaded, send, userKey]);
+
+  useEffect(() => {
+    requestAnimationFrame(() => messageScroll.current?.scrollToEnd({ animated: true }));
+  }, [activeConversation?.id, entries.length, isSending]);
+
+  const selectConversation = useCallback((conversation: ChatConversation) => {
+    setActiveConversation(conversation);
+    setIsHistoryOpen(false);
+    setDraft("");
+    setError(null);
+  }, []);
+
+  const hasArticleContext = Boolean(activeConversation?.contextArticleId);
+  const suggestions = hasArticleContext ? ARTICLE_SUGGESTIONS : GENERAL_SUGGESTIONS;
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.header}>
-        <View style={styles.headerTitleRow}>
-          <Bot size={24} color={colors.brand} />
-          <Text style={styles.title}>Asistente de noticias</Text>
-        </View>
-        <Text style={styles.subtitle}>
-          Responde con las noticias publicadas en AI News. La conversación se borra después de una
-          hora.
-        </Text>
-      </View>
-
-      <View style={styles.locationBlock}>
-        <View style={styles.locationLabelRow}>
-          <MapPin size={16} color={colors.textSecondary} />
-          <Text style={styles.locationLabel}>Ubicación simulada</Text>
-        </View>
-        {locationsError ? <Text style={styles.errorText}>{locationsError}</Text> : null}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-          {locations.map((location) => {
-            const selected = location.id === locationId;
-            return (
+    <View style={[styles.screen, isMobile ? styles.screenMobile : null]}>
+      {!isMobile || isHistoryOpen ? (
+        <View style={[styles.historyPanel, isMobile ? styles.mobileHistoryPanel : null]}>
+          <View style={styles.historyHeader}>
+            <View>
+              <Text style={styles.historyTitle}>Conversaciones</Text>
+              <Text style={styles.historySubtitle}>Disponibles durante una hora</Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Iniciar nueva conversación"
+              disabled={!isHistoryLoaded || isSending}
+              onPress={startNewConversation}
+              style={({ pressed }) => [styles.newChatButton, pressed ? styles.pressed : null]}
+            >
+              <Plus size={18} color={colors.action} />
+              <Text style={styles.newChatLabel}>Nueva</Text>
+            </Pressable>
+          </View>
+          <ScrollView
+            style={styles.historyList}
+            contentContainerStyle={styles.historyListContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            {conversations.length === 0 ? (
+              <Text style={styles.historyEmpty}>Tus conversaciones recientes aparecerán aquí.</Text>
+            ) : conversations.map((conversation) => (
               <Pressable
-                key={location.id}
+                key={conversation.id}
                 accessibilityRole="button"
-                accessibilityState={{ selected }}
-                onPress={() => selectLocation(location.id)}
+                accessibilityState={{ selected: activeConversation?.id === conversation.id }}
+                disabled={isSending}
+                onPress={() => selectConversation(conversation)}
                 style={({ pressed }) => [
-                  styles.chip,
-                  selected ? styles.chipSelected : null,
+                  styles.conversationItem,
+                  activeConversation?.id === conversation.id ? styles.conversationItemSelected : null,
                   pressed ? styles.pressed : null,
                 ]}
               >
-                <Text style={[styles.chipLabel, selected ? styles.chipLabelSelected : null]}>
-                  {location.name}
-                </Text>
+                <MessageCircle size={16} color={colors.action} />
+                <View style={styles.conversationText}>
+                  <Text style={styles.conversationTitle} numberOfLines={2}>{conversation.title}</Text>
+                  <View style={styles.conversationDateRow}>
+                    <Clock3 size={12} color={colors.textSecondary} />
+                    <Text style={styles.conversationDate}>
+                      {new Date(conversation.updatedAt).toLocaleString("es", {
+                        day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+                      })}
+                    </Text>
+                  </View>
+                </View>
               </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
-
-      {contextArticle ? (
-        <View style={styles.contextBanner}>
-          <View style={styles.contextText}>
-            <Text style={styles.contextKicker}>Preguntando sobre</Text>
-            <Text style={styles.contextTitle} numberOfLines={2}>
-              {contextArticle.title}
-            </Text>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Dejar de preguntar sobre esta noticia"
-            hitSlop={10}
-            onPress={onClearContext}
-            style={({ pressed }) => [styles.iconButton, pressed ? styles.pressed : null]}
-          >
-            <X size={18} color={colors.textSecondary} />
-          </Pressable>
+            ))}
+          </ScrollView>
         </View>
       ) : null}
 
-      <View style={styles.thread}>
-        {entries.length === 0 ? (
-          <View style={styles.emptyThread}>
-            <Text style={styles.emptyTitle}>¿Qué quieres saber?</Text>
-            <View style={styles.suggestions}>
-              {suggestions.map((suggestion) => (
-                <Pressable
-                  key={suggestion}
-                  accessibilityRole="button"
-                  disabled={isSending}
-                  onPress={() => void send(suggestion)}
-                  style={({ pressed }) => [styles.suggestion, pressed ? styles.pressed : null]}
-                >
-                  <Text style={styles.suggestionLabel}>{suggestion}</Text>
-                </Pressable>
-              ))}
+      <View style={styles.chatPanel}>
+        <View style={styles.header}>
+          <View style={styles.headerTitleRow}>
+            <Bot size={24} color={colors.brand} />
+            <View style={styles.headerCopy}>
+              <Text style={styles.title}>Asistente de noticias</Text>
+              {!isMobile ? (
+                <Text style={styles.subtitle}>Respuestas basadas en noticias publicadas.</Text>
+              ) : null}
             </View>
           </View>
-        ) : (
-          entries.map((entry) =>
+          {isMobile ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={isHistoryOpen ? "Ocultar conversaciones" : "Mostrar conversaciones"}
+              accessibilityState={{ expanded: isHistoryOpen }}
+              onPress={() => setIsHistoryOpen((open) => !open)}
+              style={({ pressed }) => [styles.mobileHistoryButton, pressed ? styles.pressed : null]}
+            >
+              <MessageCircle size={18} color={colors.action} />
+              <Text style={styles.mobileHistoryLabel}>Historial ({conversations.length})</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        <View style={styles.locationBlock}>
+          <View style={styles.locationLabelRow}>
+            <MapPin size={16} color={colors.textSecondary} />
+            <Text style={styles.locationLabel}>Ubicación simulada</Text>
+          </View>
+          {locationsError ? <Text style={styles.errorText}>{locationsError}</Text> : null}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+            {locations.map((location) => {
+              const selected = location.id === locationId;
+              return (
+                <Pressable
+                  key={location.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  onPress={() => selectLocation(location.id)}
+                  style={({ pressed }) => [
+                    styles.chip,
+                    selected ? styles.chipSelected : null,
+                    pressed ? styles.pressed : null,
+                  ]}
+                >
+                  <Text style={[styles.chipLabel, selected ? styles.chipLabelSelected : null]}>
+                    {location.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {activeConversation?.contextTitle ? (
+          <View style={styles.contextBanner}>
+            <View style={styles.contextText}>
+              <Text style={styles.contextKicker}>Conversación sobre</Text>
+              <Text style={styles.contextTitle} numberOfLines={2}>
+                {activeConversation.contextTitle}
+              </Text>
+            </View>
+            {contextArticle?.id === activeConversation.contextArticleId ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Quitar contexto de la noticia"
+                hitSlop={10}
+                onPress={onClearContext}
+                style={({ pressed }) => [styles.iconButton, pressed ? styles.pressed : null]}
+              >
+                <X size={18} color={colors.textSecondary} />
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
+        <ScrollView
+          ref={messageScroll}
+          style={styles.thread}
+          contentContainerStyle={styles.threadContent}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={() => messageScroll.current?.scrollToEnd({ animated: true })}
+        >
+          {entries.length === 0 ? (
+            <View style={styles.emptyThread}>
+              <Text style={styles.emptyTitle}>¿Qué quieres saber?</Text>
+              <Text style={styles.emptyDescription}>
+                Pregunta sobre noticias, temas o una noticia concreta.
+              </Text>
+              <View style={styles.suggestions}>
+                {suggestions.map((suggestion) => (
+                  <Pressable
+                    key={suggestion}
+                    accessibilityRole="button"
+                    disabled={!isHistoryLoaded || isSending}
+                    onPress={() => void send(suggestion)}
+                    style={({ pressed }) => [styles.suggestion, pressed ? styles.pressed : null]}
+                  >
+                    <Text style={styles.suggestionLabel}>{suggestion}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ) : entries.map((entry) =>
             entry.role === "user" ? (
               <View key={entry.id} style={[styles.bubble, styles.userBubble]}>
                 <Text style={styles.userText}>{entry.content}</Text>
@@ -284,49 +447,47 @@ export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle
             ) : (
               <AssistantBubble key={entry.id} message={entry.message} onOpenArticle={onOpenArticle} />
             ),
-          )
-        )}
-        {isSending ? (
-          <View style={[styles.bubble, styles.assistantBubble, styles.typing]}>
-            <ActivityIndicator color={colors.action} size="small" />
-            <Text style={styles.metaText}>Consultando noticias…</Text>
-          </View>
-        ) : null}
+          )}
+          {isSending ? (
+            <View style={[styles.bubble, styles.assistantBubble, styles.typing]}>
+              <ActivityIndicator color={colors.action} size="small" />
+              <Text style={styles.metaText}>Consultando noticias…</Text>
+            </View>
+          ) : null}
+        </ScrollView>
+
+        {error ? <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text> : null}
+
+        <View style={styles.composer}>
+          <TextInput
+            accessibilityLabel="Mensaje para el asistente"
+            value={draft}
+            onChangeText={setDraft}
+            placeholder="Escribe tu mensaje… (Enter para enviar)"
+            placeholderTextColor={colors.textSecondary}
+            editable={isHistoryLoaded && !isSending}
+            maxLength={2000}
+            multiline
+            submitBehavior="submit"
+            returnKeyType="send"
+            onSubmitEditing={() => void send(draft)}
+            style={styles.input}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Enviar mensaje"
+            disabled={!isHistoryLoaded || isSending || !draft.trim()}
+            onPress={() => void send(draft)}
+            style={({ pressed }) => [
+              styles.sendButton,
+              !isHistoryLoaded || isSending || !draft.trim() ? styles.sendDisabled : null,
+              pressed ? styles.pressed : null,
+            ]}
+          >
+            <Send size={20} color={colors.onSolid} />
+          </Pressable>
+        </View>
       </View>
-
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-      <View style={styles.composer}>
-        <TextInput
-          accessibilityLabel="Mensaje para el asistente"
-          value={draft}
-          onChangeText={setDraft}
-          placeholder="Pregunta por noticias, un país o un tema"
-          placeholderTextColor={colors.textSecondary}
-          editable={!isSending}
-          maxLength={2000}
-          multiline
-          onSubmitEditing={() => void send(draft)}
-          style={styles.input}
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Enviar mensaje"
-          disabled={isSending || !draft.trim()}
-          onPress={() => void send(draft)}
-          style={({ pressed }) => [
-            styles.sendButton,
-            isSending || !draft.trim() ? styles.sendDisabled : null,
-            pressed ? styles.pressed : null,
-          ]}
-        >
-          <Send size={20} color={colors.onSolid} />
-        </Pressable>
-      </View>
-
-      {entries.length > 0 ? (
-        <AppButton label="Nueva conversación" variant="ghost" onPress={startNewConversation} />
-      ) : null}
     </View>
   );
 }
@@ -377,12 +538,144 @@ function AssistantBubble({
 const styles = StyleSheet.create({
   screen: {
     width: "100%",
-    maxWidth: layout.readerWidth,
+    maxWidth: layout.maxContentWidth,
     alignSelf: "center",
+    flex: 1,
+    minHeight: 0,
+    flexDirection: "row",
     gap: spacing.md,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  screenMobile: {
+    flexDirection: "column",
+  },
+  historyPanel: {
+    width: 280,
+    minHeight: 0,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.panel,
+    backgroundColor: colors.surface,
+    overflow: "hidden",
+  },
+  mobileHistoryPanel: {
+    width: "100%",
+    height: 220,
+    maxHeight: 220,
+    flexShrink: 0,
+  },
+  historyHeader: {
+    minHeight: 76,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  historyTitle: {
+    fontFamily: fonts.headingBold,
+    fontSize: 17,
+    color: colors.ink,
+  },
+  historySubtitle: {
+    marginTop: 2,
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  newChatButton: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xxs,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radii.control,
+    backgroundColor: colors.actionSoft,
+  },
+  newChatLabel: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 13,
+    color: colors.action,
+  },
+  historyList: {
+    flex: 1,
+    minHeight: 0,
+  },
+  historyListContent: {
+    gap: spacing.xxs,
+    padding: spacing.xs,
+  },
+  historyEmpty: {
+    padding: spacing.sm,
+    fontFamily: fonts.body,
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.textSecondary,
+  },
+  conversationItem: {
+    minHeight: 56,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.xs,
+    padding: spacing.xs,
+    borderRadius: radii.control,
+  },
+  conversationItemSelected: {
+    backgroundColor: colors.actionSoft,
+  },
+  conversationText: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.xxs,
+  },
+  conversationTitle: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 14,
+    lineHeight: 19,
+    color: colors.ink,
+  },
+  conversationDateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xxs,
+  },
+  conversationDate: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  chatPanel: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+    gap: spacing.sm,
+  },
+  headerCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  mobileHistoryButton: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xxs,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radii.control,
+    backgroundColor: colors.actionSoft,
+  },
+  mobileHistoryLabel: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 13,
+    color: colors.action,
   },
   header: {
+    minHeight: 54,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: spacing.xs,
   },
   headerTitleRow: {
@@ -392,17 +685,18 @@ const styles = StyleSheet.create({
   },
   title: {
     fontFamily: fonts.headingBold,
-    fontSize: 28,
+    fontSize: 24,
     color: colors.ink,
   },
   subtitle: {
     fontFamily: fonts.body,
-    fontSize: 15,
-    lineHeight: 22,
+    fontSize: 13,
+    lineHeight: 18,
     color: colors.textSecondary,
   },
   locationBlock: {
-    gap: spacing.xs,
+    gap: spacing.xxs,
+    flexShrink: 0,
   },
   locationLabelRow: {
     flexDirection: "row",
@@ -465,11 +759,28 @@ const styles = StyleSheet.create({
     padding: spacing.xxs,
   },
   thread: {
+    flex: 1,
+    minHeight: 0,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.panel,
+    backgroundColor: colors.background,
+  },
+  threadContent: {
+    flexGrow: 1,
     gap: spacing.sm,
+    padding: spacing.md,
   },
   emptyThread: {
     gap: spacing.sm,
     paddingVertical: spacing.lg,
+    alignItems: "flex-start",
+  },
+  emptyDescription: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.textSecondary,
   },
   emptyTitle: {
     fontFamily: fonts.heading,
@@ -576,6 +887,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     gap: spacing.xs,
+    flexShrink: 0,
   },
   input: {
     flex: 1,
@@ -587,7 +899,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm,
     fontFamily: fonts.body,
-    fontSize: 15,
+    fontSize: 16,
     color: colors.text,
     backgroundColor: colors.surface,
   },

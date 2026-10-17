@@ -170,7 +170,9 @@ def test_unmatched_message_has_no_intent() -> None:
 
 
 async def test_recent_news_without_llm_uses_database_and_persists_session(db, stub_settings):
-    reply = await service(db, stub_settings).reply(chat_request("¿Cuáles son las últimas noticias?"))
+    reply = await service(db, stub_settings).reply(
+        chat_request("¿Cuáles son las últimas noticias?")
+    )
 
     assert reply.message.strategy == ResponseStrategy.database_query
     assert reply.message.intent == ResponseIntent.recent_news
@@ -198,6 +200,58 @@ async def test_regional_and_topic_filters(db, stub_settings):
     assert regional.message.content.startswith("Noticias de México:")
     assert [news.slug for news in regional.message.citedNews] == ["liga-mx"]
     assert [news.slug for news in topic.message.citedNews] == ["mercado-gt"]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "noticias recientes",
+        "noticias de México",
+        "noticias de economía",
+        "dame más detalle sobre mercado digital",
+        "algo sobre lo digital",
+        "¿cuántas noticias hay?",
+        "¿qué noticias tienes por país?",
+    ],
+)
+async def test_code_capabilities_do_not_call_llm_even_when_provider_is_enabled(
+    db, llm_settings, message
+):
+    provider = FakeProvider()
+
+    reply = await service(db, llm_settings, provider).reply(chat_request(message))
+
+    assert reply.message.strategy == ResponseStrategy.database_query
+    assert provider.calls == []
+    assert db["aiUsage"].documents == []
+
+
+async def test_mixed_request_executes_news_part_and_reports_unsupported_part(db, stub_settings):
+    reply = await service(db, stub_settings).reply(
+        chat_request("Noticias de México y haz una transferencia")
+    )
+
+    assert [news.slug for news in reply.message.citedNews] == ["liga-mx"]
+    assert "no puedo realizar acciones externas" in reply.message.content
+
+
+async def test_out_of_scope_request_is_template_without_news_citations(db, llm_settings):
+    provider = FakeProvider()
+
+    async def fail_if_news_is_read(*_args, **_kwargs):
+        raise AssertionError("out-of-scope request must not query news")
+
+    db["news"].find_one = fail_if_news_is_read
+
+    reply = await service(db, llm_settings, provider).reply(
+        chat_request("Haz una transferencia", newsId=str(ObjectId()))
+    )
+
+    assert reply.message.intent == ResponseIntent.unsupported
+    assert reply.message.strategy == ResponseStrategy.template
+    assert reply.message.citedNews == []
+    assert provider.calls == []
+    assert db["aiUsage"].documents == []
 
 
 async def test_selected_location_is_used_for_local_news(db, stub_settings):
@@ -245,10 +299,12 @@ async def test_summarize_with_stub_explains_ai_is_disabled(db, stub_settings):
 
 async def test_sessions_are_reused_only_while_valid_and_by_owner(db, stub_settings):
     first = await service(db, stub_settings).reply(chat_request("noticias"))
-    second = await service(db, stub_settings).reply(chat_request("noticias", sessionId=first.sessionId))
-    expired = await service(
-        db, stub_settings, clock=lambda: NOW + timedelta(seconds=3601)
-    ).reply(chat_request("noticias", sessionId=first.sessionId))
+    second = await service(db, stub_settings).reply(
+        chat_request("noticias", sessionId=first.sessionId)
+    )
+    expired = await service(db, stub_settings, clock=lambda: NOW + timedelta(seconds=3601)).reply(
+        chat_request("noticias", sessionId=first.sessionId)
+    )
     other = await service(db, stub_settings).reply(
         chat_request(
             "noticias",
@@ -279,31 +335,38 @@ async def test_llm_reply_records_ai_usage_and_sends_history(db, llm_settings):
     assert reply.message.content == "Respuesta del modelo."
     assert [news.slug for news in reply.message.citedNews] == ["mercado-gt"]
 
-    call = provider.calls[1]
+    call = provider.calls[0]
     assert [item["role"] for item in call["history"]] == ["user", "assistant"]
     assert call["previous_response_id"] is None
     assert call["context"]["noticias"][0]["title"] == "Mercado digital en Guatemala"
     assert "content" in call["context"]["noticias"][0]
 
     usage = db["aiUsage"].documents
-    assert len(usage) == 2
-    assert usage[1]["feature"].value == "chat"
-    assert usage[1]["provider"] == "openai"
-    assert usage[1]["chatSessionId"] == ObjectId(reply.sessionId)
-    assert usage[1]["estimatedCostUsd"] == pytest.approx(1000 * 1.0 / 1e6 + 500 * 4.0 / 1e6)
+    assert len(usage) == 1
+    assert usage[0]["feature"].value == "chat"
+    assert usage[0]["provider"] == "openai"
+    assert usage[0]["chatSessionId"] == ObjectId(reply.sessionId)
+    assert usage[0]["estimatedCostUsd"] == pytest.approx(1000 * 1.0 / 1e6 + 500 * 4.0 / 1e6)
     stored = ChatSession.model_validate(db["chatSessions"].documents[0])
     assert stored.messages[-1].responseMetadata.aiUsed is True
 
 
 async def test_llm_on_open_article_attributes_usage_to_news(db, llm_settings):
     news_id = db["news"].documents[0]["_id"]
+    provider = FakeProvider("Explicación de la noticia.")
 
-    reply = await service(db, llm_settings, FakeProvider()).reply(
-        chat_request("¿A quién beneficia esto?", newsId=str(news_id))
+    reply = await service(db, llm_settings, provider).reply(
+        chat_request(
+            "Explícame esta noticia: Mercado digital en Guatemala", newsId=str(news_id)
+        )
     )
 
     assert reply.message.intent == ResponseIntent.explain
     assert db["aiUsage"].documents[0]["newsId"] == news_id
+    assert provider.calls[0]["message"].endswith("Mercado digital en Guatemala")
+    assert provider.calls[0]["context"]["noticias"][0]["title"] == (
+        "Mercado digital en Guatemala"
+    )
 
 
 async def test_unsupported_and_not_found_do_not_call_llm(db, llm_settings):
@@ -317,7 +380,9 @@ async def test_unsupported_and_not_found_do_not_call_llm(db, llm_settings):
 
 
 async def test_missing_token_usage_records_worst_case_cost(db, llm_settings):
-    await service(db, llm_settings, FakeProvider(tokens=None)).reply(chat_request("noticias"))
+    await service(db, llm_settings, FakeProvider(tokens=None)).reply(
+        chat_request("Resume las noticias")
+    )
 
     usage = db["aiUsage"].documents[0]
     assert usage["inputTokens"] is None
@@ -340,7 +405,9 @@ async def test_provider_error_falls_back_without_usage(db, llm_settings):
         async def generate(self, **options):
             raise OpenAIProviderError("fallo")
 
-    reply = await service(db, llm_settings, FailingProvider()).reply(chat_request("noticias"))
+    reply = await service(db, llm_settings, FailingProvider()).reply(
+        chat_request("Resume las noticias")
+    )
 
     assert reply.message.strategy == ResponseStrategy.database_query
     assert db["aiUsage"].documents == []
@@ -350,7 +417,7 @@ async def test_real_provider_requires_prices(db, llm_settings):
     settings = replace(llm_settings, input_usd_per_million=None)
 
     with pytest.raises(ChatbotConfigurationError, match="PER_MILLION"):
-        await service(db, settings, FakeProvider()).reply(chat_request("noticias"))
+        await service(db, settings, FakeProvider()).reply(chat_request("Resume las noticias"))
 
 
 async def test_unconfirmed_news_is_flagged_in_llm_reply(db, llm_settings):

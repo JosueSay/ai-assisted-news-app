@@ -118,9 +118,10 @@ POST /chat
   «qué noticias tienes por país» muestra cantidades y un ejemplo publicado por país. Estas
   consultas no usan IA ni los límites de cinco ejemplos o 200 noticias recientes para contar.
   Solo se citan publicaciones; los borradores aportan únicamente su cantidad.
-- Con `CHATBOT_PROVIDER=openai` el resto de las respuestas usa el modelo (`strategy = "llm"`) con las noticias
-  como contexto autorizado y registra cada llamada en `aiUsage`. Requiere `keys/openai_api_key`,
-  `NEWS_CHAT_INPUT_USD_PER_MILLION` y `NEWS_CHAT_OUTPUT_USD_PER_MILLION`.
+- Con `CHATBOT_PROVIDER=openai`, solo resumen y explicación usan el modelo
+  (`strategy = "llm"`) con noticias como contexto autorizado; cada llamada se registra en
+  `aiUsage`. Requiere `keys/openai_api_key`, `NEWS_CHAT_INPUT_USD_PER_MILLION` y
+  `NEWS_CHAT_OUTPUT_USD_PER_MILLION`.
 - Con `stub`, sin presupuesto (`NEWS_AI_BUDGET_USD`, 20 por defecto) o si OpenAI falla, responde
   con los campos de las noticias (`strategy = "database_query"`) y no consume presupuesto.
   Peticiones fuera del dominio: `strategy = "template"`, sin IA.
@@ -136,9 +137,11 @@ Variables propias del modo: `CHAT_SESSION_TTL_SECONDS`, `NEWS_AI_BUDGET_USD`,
 
 Los modos `projection` y `novu` se conservan sin cambios para el uso original del asistente.
 
-El [plan de arquitectura JEV + CODE + LLM](../../docs/architecture/chatbot-jev-code-llm-pendientes.md)
-documenta lo que falta del diagrama original. El catálogo de capacidades y los routers
-de alcance/parciales aún están pendientes; no deben confundirse con las reglas actuales.
+La [arquitectura JEV + CODE + LLM](../../docs/architecture/chatbot-jev-code-llm-pendientes.md)
+está implementada mediante routers deterministas y un catálogo cerrado en
+`news_chat/capabilities.py` y `news_chat/routing.py`. Listados, detalle, búsqueda,
+conteos y agrupaciones usan CODE; solo resumen y explicación pueden usar LLM. Las
+peticiones mixtas ejecutan únicamente la parte de noticias y declaran el límite.
 
 ### Probar conteos y países
 

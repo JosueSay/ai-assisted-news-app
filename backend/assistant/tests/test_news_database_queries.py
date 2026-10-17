@@ -175,7 +175,7 @@ async def test_count_by_country_honors_topic_and_never_cites_drafts(database, se
 
 async def test_llm_receives_real_inventory_and_resolved_countries(database, settings):
     provider = FakeProvider()
-    await service(database, settings, provider).reply(request("Noticias de México"))
+    await service(database, settings, provider).reply(request("Resume las noticias de México"))
     context = provider.calls[0]["context"]
     assert context["inventario"] == {"total": 37, "published": 33, "draft": 4}
     assert context["seleccion"]["mostradas"] == len(context["noticias"])
@@ -194,7 +194,7 @@ async def test_unresolved_location_is_explicit_instead_of_using_the_user_country
     document["geographicScope"]["locationIds"] = [missing]
     provider = FakeProvider()
     await service(database, settings, provider).reply(
-        request("Dame más detalle", newsId=str(document["_id"]))
+        request("Explícame esta noticia", newsId=str(document["_id"]))
     )
     scope = provider.calls[0]["context"]["noticias"][0]["geographicScope"]
     assert scope["locationIds"] == [str(missing)]
@@ -251,8 +251,17 @@ async def test_named_country_search_can_find_news_older_than_the_recent_window(d
     provider = FakeProvider()
     reply = await service(database, settings, provider).reply(request("Noticias de México"))
     assert reply.message.citedNews
-    for article in provider.calls[0]["context"]["noticias"]:
-        assert article["geographicScope"]["locations"][0]["countryCode"] == "MX"
+    cited_ids = {citation.id for citation in reply.message.citedNews}
+    cited = [
+        document for document in database["news"].documents if str(document["_id"]) in cited_ids
+    ]
+    locations = {location["_id"]: location for location in database["locations"].documents}
+    assert all(
+        locations[location_id]["countryCode"] == "MX"
+        for document in cited
+        for location_id in document["geographicScope"]["locationIds"]
+    )
+    assert provider.calls == []
 
 
 async def test_country_overview_can_be_requested_while_an_article_is_open(database, settings):
@@ -266,19 +275,26 @@ async def test_country_overview_can_be_requested_while_an_article_is_open(databa
     assert provider.calls == []
 
 
-async def test_llm_knows_five_recent_examples_are_a_partial_selection(database, settings):
+async def test_llm_receives_a_bounded_selection_for_summarization(database, settings):
     provider = FakeProvider()
-    await service(database, settings, provider).reply(request("noticias recientes"))
+    await service(database, settings, provider).reply(request("Resume las noticias recientes"))
     context = provider.calls[0]["context"]
-    assert len(context["noticias"]) == 5
+    assert len(context["noticias"]) <= 3
     assert context["seleccion"] == {
-        "mostradas": 5,
-        "coincidenciasPublicadas": 33,
+        "mostradas": len(context["noticias"]),
+        "coincidenciasPublicadas": None,
         "esMuestra": True,
     }
     assert context["inventario"]["total"] == 37
-    assert {
-        loc["countryCode"]
-        for article in context["noticias"]
-        for loc in article["geographicScope"]["locations"]
-    } == {"GT"}
+    assert context["noticias"]
+
+
+async def test_code_listing_declares_when_results_are_only_a_sample(database, settings):
+    provider = FakeProvider()
+
+    reply = await service(database, settings, provider).reply(request("noticias recientes"))
+
+    assert reply.message.strategy == ResponseStrategy.database_query
+    assert "Se muestran 5 de 33 noticias publicadas" in reply.message.content
+    assert "es una selección" in reply.message.content
+    assert provider.calls == []

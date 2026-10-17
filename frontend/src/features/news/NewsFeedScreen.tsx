@@ -1131,15 +1131,19 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.contentFrame}
       >
-        <ScrollView
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={[
-            styles.scrollContent,
-            isMobile ? styles.scrollContentMobile : null,
-          ]}
-        >
-          <View style={styles.container}>{renderContent()}</View>
-        </ScrollView>
+        {route.name === "chat" ? (
+          <View style={[styles.container, styles.chatContainer]}>{renderContent()}</View>
+        ) : (
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={[
+              styles.scrollContent,
+              isMobile ? styles.scrollContentMobile : null,
+            ]}
+          >
+            <View style={styles.container}>{renderContent()}</View>
+          </ScrollView>
+        )}
       </KeyboardAvoidingView>
 
       {isMobile ? (
@@ -1304,6 +1308,12 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     paddingHorizontal: spacing.md,
     gap: spacing.xl,
+  },
+  chatContainer: {
+    flex: 1,
+    minHeight: 0,
+    paddingVertical: 0,
+    gap: 0,
   },
   notice: {
     color: colors.textSecondary,

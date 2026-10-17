@@ -49,30 +49,37 @@ def _resolve(
     affirmative = bool(words & ACKNOWLEDGMENTS) and words <= ACK_WORDS
     ordinal = next((index for word, index in ORDINALS.items() if word in words), None)
     country_reference = bool(re.search(r"\bde que pais(?:es)?\b", text))
-    reference = country_reference or (
-        query.intent in ELABORATIONS
-        and not query.has_filters
-        and (
-            ordinal is not None
-            or not query.terms
-            or bool(
-                words
-                & {
-                    "esas",
-                    "esos",
-                    "esa",
-                    "ese",
-                    "esto",
-                    "eso",
-                    "estas",
-                    "estos",
-                    "resumelas",
-                    "resumela",
-                    "explicala",
-                    "explicalas",
-                }
+    demonstrative_reference = query.intent is None and bool(
+        words & {"eso", "esto", "esa", "ese", "esas", "esos", "estas", "estos"}
+    )
+    reference = (
+        country_reference
+        or (
+            query.intent in ELABORATIONS
+            and not query.has_filters
+            and (
+                ordinal is not None
+                or not query.terms
+                or bool(
+                    words
+                    & {
+                        "esas",
+                        "esos",
+                        "esa",
+                        "ese",
+                        "esto",
+                        "eso",
+                        "estas",
+                        "estos",
+                        "resumelas",
+                        "resumela",
+                        "explicala",
+                        "explicalas",
+                    }
+                )
             )
         )
+        or demonstrative_reference
     )
     short_count = bool(words & {"cuantas", "cuantos"}) and not words & {"noticias", "articulos"}
     connector = text.startswith(("y ", "tambien ", "ahora ", "en cambio "))

@@ -40,6 +40,7 @@ from ..config import ChatbotConfigurationError, Settings
 from ..prompts import load_system_prompt
 from ..providers.base import ChatProvider
 from ..providers.openai import OpenAIProviderError
+from .capabilities import Capability, ExecutionMode, validate_capability_catalog
 from .conversation import resolve_message
 from .intent import ClassifiedQuery
 from .retrieval import (
@@ -60,18 +61,12 @@ from .retrieval import (
     select_news,
     verification_status,
 )
+from .routing import Scope, resolve_turn
 from .schemas import ChatAssistantMessage, ChatCitedNews, ChatReply, ChatRequest
 
 HISTORY_MESSAGES_FOR_LLM = 10
 # Estimación conservadora de tokens por carácter para el chequeo de presupuesto.
 CHARS_PER_TOKEN_ESTIMATE = 3
-
-LISTING_INTENTS = {
-    ResponseIntent.recent_news,
-    ResponseIntent.regional_news,
-    ResponseIntent.topic_news,
-}
-
 
 UNSUPPORTED_REPLY = (
     "Solo puedo ayudarte con las noticias publicadas en AI News. Puedes pedirme las "
@@ -82,6 +77,9 @@ NOT_FOUND_REPLY = (
     "No encontré noticias publicadas que coincidan con tu consulta. "
     "Prueba con otro país, otro tema o pide las últimas noticias."
 )
+
+if catalog_errors := validate_capability_catalog():
+    raise RuntimeError(f"Invalid news capability catalog: {', '.join(catalog_errors)}")
 
 
 class NewsChatRequestError(RuntimeError):
@@ -160,19 +158,42 @@ class NewsChatService:
         user = await self._ensure_user(request, location_id, now, admin_username=admin_username)
         session = await self._load_or_create_session(session_id, user, now)
 
-        news_document = None
-        if news_id is not None:
-            news_document = await find_published_news(self._db, news_id)
-            if news_document is None:
-                raise NewsChatRequestError("La noticia no existe o no está publicada.", 404)
-
         query = resolve_message(
             request.message,
             session.get("messages") or [],
-            has_news_context=news_document is not None,
+            has_news_context=news_id is not None,
         )
-        plan = await self._plan(query, news_document, user, session)
-        answer = await self._answer(request, plan, news_document, user, session)
+        turn = resolve_turn(
+            request.message,
+            query,
+            has_news_context=news_id is not None,
+        )
+        news_document = None
+        if turn.scope == Scope.OUT_OF_SCOPE:
+            plan = _Plan(intent=ResponseIntent.unsupported)
+        else:
+            if news_id is not None:
+                news_document = await find_published_news(self._db, news_id)
+                if news_document is None:
+                    raise NewsChatRequestError("La noticia no existe o no está publicada.", 404)
+            plan = await self._plan(
+                turn.query,
+                news_document,
+                user,
+                session,
+                capability=turn.capability,
+            )
+        answer = await self._answer(
+            request,
+            plan,
+            news_document,
+            user,
+            session,
+            capability=turn.capability,
+            prompt_message=turn.business_message,
+        )
+        if turn.scope_note:
+            answer.content = f"{answer.content}\n\n{turn.scope_note}"
 
         assistant_created_at = self._clock()
         metadata = ResponseMetadata(
@@ -366,12 +387,26 @@ class NewsChatService:
         news_document: dict[str, Any] | None,
         user: dict[str, Any],
         session: dict[str, Any],
+        *,
+        capability: Capability | None,
     ) -> _Plan:
-        if query.wants_count or (query.group_by_country and query.intent in LISTING_INTENTS):
+        if capability is None:
+            return _Plan(intent=ResponseIntent.unsupported)
+        if capability.resource == "count_news":
             return await self._inventory_plan(query, user)
-        if news_document is not None:
+        if capability.resource == "group_news_by_country":
+            if query.use_previous_citations:
+                cited = await self._previously_cited(session)
+                return await self._group_cited_by_country(cited)
+            return await self._inventory_plan(query, user)
+        if (
+            capability.resource in {"find_published_news", "published_news_context"}
+            and news_document is not None
+        ):
             intent = query.intent or ResponseIntent.explain
-            return self._plan_for(intent, [news_document], intro="")
+            return self._plan_for(
+                intent, [news_document], intro="", presentation=capability.presentation
+            )
         if query.use_previous_citations:
             cited = await self._previously_cited(session, query.citation_index)
             if not cited:
@@ -384,6 +419,7 @@ class NewsChatService:
                 cited,
                 intro="",
                 preserve_selection=True,
+                presentation=capability.presentation,
             )
 
         locations = await self._query_locations(query, user)
@@ -391,14 +427,23 @@ class NewsChatService:
         intent = query.intent
         filters = news_filters(query, location_ids)
         matching_count = None
-        if intent in LISTING_INTENTS:
+        if capability.resource == "search_published_news":
+            recent = await recent_published_news(self._db)
+            candidates = select_news(recent, query, location_ids, use_terms=True)
+        elif capability.resource == "recent_published_news":
+            candidates = await recent_published_news(self._db)
+            matching_count = await self._db["news"].count_documents({"status": "published"})
+            candidates = candidates[:LISTING_LIMIT]
+        elif capability.resource == "published_news_matching":
             candidates = await published_news_matching(self._db, filters)
             matching_count = await self._db["news"].count_documents(
                 {**filters, "status": "published"}
             )
-        else:
+        elif capability.resource in {"published_news_context", "find_published_news"}:
             recent = await recent_published_news(self._db)
             candidates = select_news(recent, query, location_ids, use_terms=True)
+        else:
+            return _Plan(intent=ResponseIntent.unsupported)
 
         if intent is None:
             if query.terms:
@@ -430,7 +475,13 @@ class NewsChatService:
             intro = "Estas son las noticias más recientes:"
         else:
             intro = ""
-        plan = self._plan_for(intent, candidates, intro=intro)
+        plan = self._plan_for(
+            intent,
+            candidates,
+            intro=intro,
+            presentation=capability.presentation,
+            matching_count=matching_count,
+        )
         plan.matching_count = matching_count
         return plan
 
@@ -482,6 +533,39 @@ class NewsChatService:
         cited = await published_news_matching(self._db, filters)
         return _Plan(query.intent or ResponseIntent.recent_news, cited, reply, database_only=True)
 
+    async def _group_cited_by_country(self, cited: list[dict[str, Any]]) -> _Plan:
+        if not cited:
+            return _Plan(
+                intent=ResponseIntent.regional_news,
+                database_reply="No encontré noticias publicadas en la selección anterior.",
+                database_only=True,
+            )
+        locations = await resolve_news_locations(self._db, cited)
+        groups: dict[str, list[str]] = {}
+        for document in cited:
+            scope = document.get("geographicScope") or {}
+            countries = {
+                str(locations[location_id].get("country"))
+                for location_id in scope.get("locationIds") or []
+                if location_id in locations and locations[location_id].get("country")
+            }
+            for country in sorted(countries):
+                groups.setdefault(country, []).append(str(document.get("title") or "Noticia"))
+        if not groups:
+            reply = "No pude resolver los países de las noticias publicadas seleccionadas."
+        else:
+            lines = ["Las noticias seleccionadas corresponden a estos países:"]
+            for country, titles in sorted(groups.items()):
+                lines.append(f"\n**{country}**")
+                lines.extend(f"- {title}" for title in titles)
+            reply = "\n".join(lines)
+        return _Plan(
+            intent=ResponseIntent.regional_news,
+            cited=cited,
+            database_reply=reply,
+            database_only=True,
+        )
+
     @staticmethod
     def _plan_for(
         intent: ResponseIntent,
@@ -489,18 +573,30 @@ class NewsChatService:
         *,
         intro: str,
         preserve_selection: bool = False,
+        presentation: str,
+        matching_count: int | None = None,
     ) -> _Plan:
-        if intent in LISTING_INTENTS:
+        if presentation in {"listing", "search"} and intent != ResponseIntent.news_detail:
             cited = candidates[:LISTING_LIMIT]
-            return _Plan(intent, cited, format_listing(intro, cited))
-        if intent == ResponseIntent.news_detail:
+            reply = format_listing(intro, cited)
+            if matching_count is not None and matching_count > len(cited):
+                reply += (
+                    f"\n\nSe muestran {len(cited)} de {matching_count} noticias publicadas; "
+                    "es una selección."
+                )
+            elif presentation == "search":
+                reply += "\n\nLa búsqueda se limita a noticias publicadas recientes."
+            return _Plan(intent, cited, reply)
+        if presentation == "detail" or intent == ResponseIntent.news_detail:
             cited = candidates[:1]
             return _Plan(intent, cited, format_detail(cited[0]), include_content=True)
         cited = candidates if preserve_selection else candidates[:ELABORATION_LIMIT]
-        if intent == ResponseIntent.summarize:
+        if presentation == "summary":
             reply = format_listing("Resumen de las noticias:", cited)
-        else:
+        elif presentation in {"explanation", "search"}:
             reply = "\n\n".join(format_detail(document) for document in cited)
+        else:
+            return _Plan(intent=ResponseIntent.unsupported)
         return _Plan(intent, cited, reply, include_content=True)
 
     # ------------------------------------------------------------------
@@ -514,6 +610,9 @@ class NewsChatService:
         news_document: dict[str, Any] | None,
         user: dict[str, Any],
         session: dict[str, Any],
+        *,
+        capability: Capability | None,
+        prompt_message: str,
     ) -> _Answer:
         if plan.intent == ResponseIntent.unsupported:
             return _Answer(
@@ -525,6 +624,8 @@ class NewsChatService:
             )
 
         confidence = compute_confidence(plan.cited)
+        if capability is None or capability.execution == ExecutionMode.CODE:
+            return self._database_answer(plan, confidence, note=None)
         if plan.database_only:
             return self._database_answer(plan, confidence, note=None)
         if not plan.cited:
@@ -566,7 +667,7 @@ class NewsChatService:
                 "esMuestra": plan.matching_count is None or plan.matching_count > len(plan.cited),
             },
         }
-        message = f"Petición ({plan.intent.value}): {request.message}"
+        message = f"Petición ({plan.intent.value}): {prompt_message}"
 
         input_chars = (
             len(instructions)
