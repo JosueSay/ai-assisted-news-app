@@ -1,5 +1,11 @@
 import type { CategoryId, NewsArticle } from "../types";
-import type { LocationLevel, NewsStatus, SourceType, VerificationStatus } from "../generated/newsContract";
+import type {
+  LocationLevel,
+  NewsStatus,
+  SourceType,
+  UserRole,
+  VerificationStatus,
+} from "../generated/newsContract";
 
 export type NewsFeedResult = {
   articles: NewsArticle[];
@@ -14,11 +20,13 @@ export type NewsLocation = {
   level: LocationLevel;
 };
 
-export type AdminSession = {
-  accessToken: string;
-  tokenType: "Bearer";
-  expiresIn: number;
-  username: string;
+export type AuthenticatedProfile = {
+  id: string;
+  firebaseUid: string;
+  email: string;
+  displayName: string;
+  photoUrl: string;
+  role: UserRole;
 };
 
 export type AdminNewsCreateInput = {
@@ -91,17 +99,19 @@ export async function fetchNewsArticleBySlug(slug: string): Promise<NewsArticle 
   return (await response.json()) as NewsArticle;
 }
 
-export async function loginAdmin(username: string, password: string): Promise<AdminSession> {
+export async function fetchAuthenticatedProfile(idToken: string): Promise<AuthenticatedProfile> {
   const baseUrl = requireApiBaseUrl();
-  const response = await fetch(`${baseUrl}/admin/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+  const response = await fetch(`${baseUrl}/auth/me`, {
+    headers: { Authorization: `Bearer ${idToken}` },
   });
   if (!response.ok) {
-    throw new Error(response.status === 401 ? "Credenciales admin inválidas." : "No pudimos iniciar sesión admin.");
+    throw new Error(
+      response.status === 401
+        ? "La sesión Firebase no es válida. Vuelve a iniciar sesión."
+        : "No pudimos validar tu perfil de AI News.",
+    );
   }
-  return (await response.json()) as AdminSession;
+  return (await response.json()) as AuthenticatedProfile;
 }
 
 export async function fetchLocations(): Promise<NewsLocation[]> {

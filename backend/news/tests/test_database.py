@@ -18,9 +18,7 @@ def make_settings(**overrides) -> NewsSettings:
         "mongodb_local_uri": "mongodb://news-mongo:27017/test_news",
         "mongodb_required": True,
         "mongodb_timeout_ms": 5000,
-        "admin_username": "admin",
-        "admin_password_file": Path("/fake/admin_password"),
-        "admin_token_ttl_seconds": 3600,
+        "firebase_project_id": "test-project",
     }
     defaults.update(overrides)
     return NewsSettings(**defaults)

@@ -13,7 +13,6 @@ import {
 import { Bot, Clock3, MapPin, MessageCircle, Plus, Send, X } from "lucide-react-native";
 
 import {
-  chatExternalUserId,
   isSessionActive,
   sendChatMessage,
   type ChatAssistantMessage,
@@ -85,7 +84,7 @@ function nextEntryId() {
 }
 
 export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle }: Props) {
-  const userKey = chatExternalUserId(user);
+  const userKey = user.id;
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
@@ -182,7 +181,7 @@ export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle
       const message = text.trim();
       if (!isHistoryLoaded || !message || sending.current) return;
 
-      const target = conversationOverride ?? activeConversation ?? {
+      const target: ActiveConversation = conversationOverride ?? activeConversation ?? {
         id: `draft-${nextEntryId()}`,
         userKey,
         sessionId: null,
@@ -203,7 +202,6 @@ export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle
       try {
         const reply = await sendChatMessage({
           message,
-          user,
           sessionId: activeSession,
           newsId: baseEntries.length === 0 ? target.contextArticleId ?? null : null,
           locationId,

@@ -12,6 +12,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@firebase/app": "^0.16.2",
+    "@firebase/auth": "^1.13.6",
     "@expo-google-fonts/newsreader": "^0.4.1",
     "@expo-google-fonts/roboto": "^0.4.3",
     "@react-native-async-storage/async-storage": "2.2.0",

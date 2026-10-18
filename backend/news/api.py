@@ -7,24 +7,23 @@ import re
 import unicodedata
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Annotated, Any
 
 from bson import ObjectId
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
-from .auth import (
-    AdminAuthenticationError,
-    authorized_admin_username,
-    create_admin_token,
-    password_matches,
-)
 from .config import NewsDatabaseConfigurationError, get_news_settings
 from .database import NewsDatabaseError, get_news_client
-from .identity import admin_author_id, admin_external_id
+from .firebase_auth import (
+    FirebaseAuthenticationError,
+    FirebaseConfigurationError,
+    FirebaseIdentity,
+    verify_firebase_bearer,
+)
 from .models import (
     AuditAction,
     ImageType,
@@ -44,9 +43,8 @@ from .models.news import (
     Verification,
 )
 from .models.reading_time import compute_reading_time
-from .models.user import Onboarding, User
-from .secret_loader import SecretFileError, load_secret
 from .topics import TOPICS
+from .user_accounts import UserAccountError, ensure_news_user
 
 CATEGORY_IDS = set(TOPICS)
 DEFAULT_ALLOWED_ORIGINS = (
@@ -115,21 +113,13 @@ class LocationResponse(BaseModel):
     level: str
 
 
-class AdminLoginRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=120)
-    password: str = Field(min_length=1, max_length=500)
-
-    @field_validator("username", "password")
-    @classmethod
-    def strip_value(cls, value: str) -> str:
-        return value.strip()
-
-
-class AdminLoginResponse(BaseModel):
-    accessToken: str
-    tokenType: str = "Bearer"
-    expiresIn: int
-    username: str
+class AuthenticatedUserResponse(BaseModel):
+    id: str
+    firebaseUid: str
+    email: str
+    displayName: str
+    photoUrl: str
+    role: UserRole
 
 
 class AdminNewsCreateRequest(BaseModel):
@@ -317,69 +307,41 @@ def _parse_object_id(value: str, field_name: str) -> ObjectId:
     return ObjectId(value)
 
 
-def _load_admin_password(settings) -> str:
+def _authenticated_firebase_identity(
+    request: Request, authorization: str | None
+) -> FirebaseIdentity:
     try:
-        return load_secret(settings.admin_password_file)
-    except SecretFileError as error:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "La autenticación admin no está configurada. "
-                "Crea keys/news_admin_password con la contraseña admin."
-            ),
-        ) from error
+        return verify_firebase_bearer(
+            authorization,
+            request.app.state.news_settings.firebase_project_id,
+        )
+    except FirebaseAuthenticationError as error:
+        raise HTTPException(status_code=401, detail="Firebase ID token inválido o vencido.") from error
+    except FirebaseConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
-def _authorized_admin_username(request: Request) -> str:
+def get_authenticated_user(
+    request: Request, authorization: str | None = Header(default=None)
+) -> dict[str, Any]:
+    identity = _authenticated_firebase_identity(request, authorization)
+    settings = request.app.state.news_settings
+    database = request.app.state.news_client[settings.mongodb_database]
     try:
-        return authorized_admin_username(
-            request.headers.get("Authorization", ""), request.app.state.news_settings
+        return ensure_news_user(
+            database,
+            identity,
+            default_location_code=os.getenv("NEWS_CHAT_DEFAULT_LOCATION_CODE", "GT"),
         )
-    except AdminAuthenticationError as error:
+    except UserAccountError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except PyMongoError as error:
         raise HTTPException(
-            status_code=401, detail="Token admin inválido o requerido."
-        ) from error
-    except SecretFileError as error:
-        raise HTTPException(
-            status_code=503, detail="La autenticación admin no está configurada."
+            status_code=503, detail="No fue posible resolver tu usuario en MongoDB."
         ) from error
 
 
-def _stable_admin_author_id(username: str) -> ObjectId:
-    return admin_author_id(username)
-
-
-def _ensure_admin_author(database, username: str, location_id: ObjectId) -> ObjectId:
-    now = datetime.now(timezone.utc)
-    author_id = _stable_admin_author_id(username)
-    existing = database["users"].find_one({"firebaseUid": admin_external_id(username)})
-    if existing:
-        database["users"].update_one(
-            {"_id": existing["_id"]}, {"$set": {"updatedAt": now, "lastLoginAt": now}}
-        )
-        return existing["_id"]
-    created_at = now
-    user = User(
-        _id=author_id,
-        firebaseUid=admin_external_id(username),
-        email=f"{username}@local.admin",
-        displayName="Admin local",
-        photoUrl="",
-        role=UserRole.admin,
-        simulatedLocationId=location_id,
-        onboarding=Onboarding(
-            completed=True, completedAt=created_at, selectedTopics=[]
-        ),
-        createdAt=created_at,
-        updatedAt=now,
-        lastLoginAt=now,
-    )
-    database["users"].replace_one(
-        {"_id": author_id},
-        user.model_dump_mongo(),
-        upsert=True,
-    )
-    return author_id
+AuthenticatedUser = Annotated[dict[str, Any], Depends(get_authenticated_user)]
 
 
 def _source_from_request(
@@ -422,7 +384,7 @@ def _image_from_request(payload: AdminNewsCreateRequest) -> Image:
 def _create_news_document(
     database,
     payload: AdminNewsCreateRequest,
-    admin_username: str,
+    actor: dict[str, Any],
 ) -> dict[str, Any]:
     location_id = _parse_object_id(payload.locationId, "locationId")
     location = database["locations"].find_one(
@@ -435,7 +397,7 @@ def _create_news_document(
         )
 
     now = datetime.now(timezone.utc)
-    author_id = _ensure_admin_author(database, admin_username, location_id)
+    author_id = actor["_id"]
     content = payload.content.strip()
     word_count, reading_minutes = compute_reading_time(content)
     published_at = now if payload.status == NewsStatus.published else None
@@ -471,7 +433,7 @@ def _create_news_document(
             status=payload.verificationStatus,
             reviewedBy=author_id,
             reviewedAt=now,
-            notes="Creada manualmente desde el panel admin local.",
+            notes="Creada desde el panel administrativo autenticado con Firebase.",
         ),
         sources=_source_from_request(payload, now),
         image=_image_from_request(payload),
@@ -595,27 +557,15 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Noticia no encontrada.")
         return document_to_article(database, document)
 
-    @application.post("/admin/login", response_model=AdminLoginResponse)
-    async def admin_login(
-        payload: AdminLoginRequest, request: Request
-    ) -> AdminLoginResponse:
-        settings = request.app.state.news_settings
-        expected_password = _load_admin_password(settings)
-        if payload.username != settings.admin_username or not password_matches(
-            payload.password,
-            expected_password,
-        ):
-            raise HTTPException(status_code=401, detail="Credenciales admin inválidas.")
-
-        token = create_admin_token(
-            payload.username,
-            expected_password,
-            settings.admin_token_ttl_seconds,
-        )
-        return AdminLoginResponse(
-            accessToken=token,
-            expiresIn=settings.admin_token_ttl_seconds,
-            username=payload.username,
+    @application.get("/auth/me", response_model=AuthenticatedUserResponse)
+    async def current_user(user: AuthenticatedUser):
+        return AuthenticatedUserResponse(
+            id=str(user["_id"]),
+            firebaseUid=user["firebaseUid"],
+            email=user["email"],
+            displayName=user["displayName"],
+            photoUrl=user["photoUrl"],
+            role=user["role"],
         )
 
     @application.post(
@@ -624,12 +574,14 @@ def create_app() -> FastAPI:
     async def admin_create_news(
         payload: AdminNewsCreateRequest,
         request: Request,
+        user: AuthenticatedUser,
     ) -> NewsArticleResponse:
-        admin_username = _authorized_admin_username(request)
+        if user.get("role") != UserRole.admin and user.get("role") != UserRole.admin.value:
+            raise HTTPException(status_code=403, detail="Se requiere rol administrador.")
         settings = request.app.state.news_settings
         database = request.app.state.news_client[settings.mongodb_database]
         try:
-            document = _create_news_document(database, payload, admin_username)
+            document = _create_news_document(database, payload, user)
         except HTTPException:
             raise
         except ValueError as error:

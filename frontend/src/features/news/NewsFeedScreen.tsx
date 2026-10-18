@@ -51,6 +51,7 @@ import {
   type AdminNewsCreateInput,
   type NewsLocation,
 } from "../../services/newsService";
+import { getCurrentFirebaseIdToken } from "../../services/firebaseClient";
 import { colors, fonts, layout, radii, shadows, spacing } from "../../theme";
 
 type Props = {
@@ -178,7 +179,7 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
   const [adminFormError, setAdminFormError] = useState<string | null>(null);
   const [adminSuccess, setAdminSuccess] = useState<string | null>(null);
 
-  const isAdmin = user.role === "admin" && Boolean(user.adminToken);
+  const isAdmin = user.role === "admin";
 
   useEffect(() => {
     let active = true;
@@ -362,7 +363,7 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
   }
 
   const submitAdminNews = useCallback(async () => {
-    if (!user.adminToken) {
+    if (!isAdmin) {
       setAdminFormError("Inicia sesión como admin para crear noticias.");
       return;
     }
@@ -373,7 +374,8 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
     setAdminFormError(null);
     setAdminSuccess(null);
     try {
-      const created = await createAdminNews(user.adminToken, input);
+      const idToken = await getCurrentFirebaseIdToken();
+      const created = await createAdminNews(idToken, input);
       if (input.status === "published") {
         setArticles((current) => [
           created,
@@ -397,7 +399,7 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
     } finally {
       setIsSubmittingAdminNews(false);
     }
-  }, [adminForm, user.adminToken]);
+  }, [adminForm, isAdmin]);
 
   const renderNotice = () => (
     <>

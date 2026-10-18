@@ -4,9 +4,12 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from news.auth import AdminAuthenticationError, authorized_admin_username
 from news.config import get_news_settings
-from news.secret_loader import SecretFileError
+from news.firebase_auth import (
+    FirebaseAuthenticationError,
+    FirebaseConfigurationError,
+    verify_firebase_bearer,
+)
 from pymongo.errors import PyMongoError
 
 from .config import ChatbotConfigurationError, api_key_is_configured, get_settings
@@ -152,20 +155,17 @@ def create_app() -> FastAPI:
             service: NewsChatServiceDependency,
         ) -> news_schemas.ChatReply:
             try:
-                admin_username = None
-                if chat_request.user.id.startswith(("admin:", "local-admin:")):
-                    admin_username = authorized_admin_username(
-                        request.headers.get("Authorization", ""), get_news_settings()
-                    )
-                return await service.reply(chat_request, admin_username=admin_username)
-            except AdminAuthenticationError as error:
+                identity = verify_firebase_bearer(
+                    request.headers.get("Authorization"),
+                    get_news_settings().firebase_project_id,
+                )
+                return await service.reply(chat_request, identity=identity)
+            except FirebaseAuthenticationError as error:
                 raise HTTPException(
-                    status_code=401, detail="Token admin inválido o requerido."
+                    status_code=401, detail="Firebase ID token inválido o vencido."
                 ) from error
-            except SecretFileError as error:
-                raise HTTPException(
-                    status_code=503, detail="La autenticación admin no está configurada."
-                ) from error
+            except FirebaseConfigurationError as error:
+                raise HTTPException(status_code=503, detail=str(error)) from error
             except ChatbotConfigurationError as error:
                 raise HTTPException(status_code=503, detail=str(error)) from error
             except NewsChatRequestError as error:

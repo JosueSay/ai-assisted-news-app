@@ -24,11 +24,6 @@ DEFAULT_TIMEOUT_MS = 5000
 DEFAULT_REQUIRED = True
 DEFAULT_MODE = "atlas"
 DEFAULT_LOCAL_URI = "mongodb://localhost:27018/ai_assisted_news"
-DEFAULT_ADMIN_USERNAME = "admin"
-DEFAULT_ADMIN_PASSWORD_FILE = PROJECT_ROOT / "keys" / "news_admin_password"
-DEFAULT_ADMIN_TOKEN_TTL_SECONDS = 3600
-
-
 class NewsDatabaseConfigurationError(RuntimeError):
     """La configuración de la base de datos de noticias no es válida."""
 
@@ -51,9 +46,7 @@ class NewsSettings:
     mongodb_local_uri: str
     mongodb_required: bool
     mongodb_timeout_ms: int
-    admin_username: str
-    admin_password_file: Path
-    admin_token_ttl_seconds: int
+    firebase_project_id: str
 
     @property
     def mongodb_configured(self) -> bool:
@@ -113,12 +106,6 @@ def get_news_settings() -> NewsSettings:
 
     raw_uri_file = os.getenv("NEWS_MONGODB_URI_FILE", "").strip()
     uri_file = _resolve_path(raw_uri_file) if raw_uri_file else DEFAULT_URI_FILE
-    raw_admin_password_file = os.getenv("NEWS_ADMIN_PASSWORD_FILE", "").strip()
-    admin_password_file = (
-        _resolve_path(raw_admin_password_file)
-        if raw_admin_password_file
-        else DEFAULT_ADMIN_PASSWORD_FILE
-    )
     mode = _read_choice("NEWS_DB_MODE", DEFAULT_MODE, {"atlas", "local"})
 
     return NewsSettings(
@@ -132,10 +119,5 @@ def get_news_settings() -> NewsSettings:
         mongodb_timeout_ms=_read_positive_int(
             "NEWS_MONGODB_TIMEOUT_MS", DEFAULT_TIMEOUT_MS
         ),
-        admin_username=os.getenv("NEWS_ADMIN_USERNAME", DEFAULT_ADMIN_USERNAME).strip()
-        or DEFAULT_ADMIN_USERNAME,
-        admin_password_file=admin_password_file,
-        admin_token_ttl_seconds=_read_positive_int(
-            "NEWS_ADMIN_TOKEN_TTL_SECONDS", DEFAULT_ADMIN_TOKEN_TTL_SECONDS
-        ),
+        firebase_project_id=os.getenv("NEWS_FIREBASE_PROJECT_ID", "").strip(),
     )

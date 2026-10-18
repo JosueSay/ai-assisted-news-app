@@ -78,49 +78,68 @@ local de respaldo en el frontend.
 
 ## Qué vas a ver
 
-Al abrir la app aparece la pantalla de login con tres accesos:
+Al abrir la app aparece la pantalla de autenticación:
 
-- **"Continuar como invitado"** — entra directo, sin configuración previa.
-  Es la forma más rápida de mostrar la experiencia completa (feed de
-  noticias, header con usuario, logout) en ambos teléfonos ahora mismo.
-- **"Iniciar sesión con Google"** — queda deshabilitado hasta configurar
-  credenciales reales (ver abajo). Sin configurar, el hint en pantalla lo
-  explica.
-- **"Acceso admin"** — muestra usuario/contraseña local. Requiere completar
-  `keys/news_admin_password` y tener levantada la API local. Al entrar como
-  admin aparece **Nueva noticia**, una sección para crear publicaciones o
-  guardar borradores en MongoDB.
+- **"Continuar como invitado"** — crea una sesión Firebase Anonymous; requiere
+  habilitar el proveedor Anonymous en el proyecto.
+- **"Iniciar sesión con Google"** — obtiene una sesión Firebase Authentication.
+  Las cuentas admin usan este mismo botón y reciben permisos solo si
+  `users.role` tiene `admin` en el servidor.
+- No hay acceso admin por contraseña local ni token de frontend.
 
-## Google Sign-In real
+## Configurar Firebase Authentication
 
-El código ya implementa el flujo completo (Authorization Code + PKCE contra
-Google, sin exponer client secret) en
-[`src/services/googleAuth.ts`](src/services/googleAuth.ts). Para activarlo:
+1. En Firebase Console, habilita los proveedores **Google** y **Anonymous**.
+2. Registra las apps Android e iOS con el mismo ID de [`app.json`](app.json):
+   `com.aina.news`. Registra además una app web para el acceso web.
+3. En la app Android agrega las huellas SHA-1 y SHA-256 de las firmas que usarás
+   para development y distribución. Habilita los dominios autorizados del portal.
+4. Copia la configuración pública de Firebase Web a `frontend/.env`:
 
-1. En [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-   creá dos **OAuth client ID**: uno tipo **Android** (con el package
-   `com.aina.news` de [`app.json`](app.json) y el SHA-1 de tu build) y uno
-   tipo **iOS** (con el bundle id `com.aina.news`).
-2. Copiá `.env.example` a `.env` y completá `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`
-   y `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`.
-3. Generá un **dev client propio** con EAS (build en la nube, no requiere
-   Mac):
+   ```dotenv
+   EXPO_PUBLIC_FIREBASE_API_KEY=...
+   EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=...firebaseapp.com
+   EXPO_PUBLIC_FIREBASE_PROJECT_ID=...
+   EXPO_PUBLIC_FIREBASE_APP_ID=...
+   ```
+
+5. Configura los OAuth Client IDs Android e iOS en el mismo archivo:
+
+   ```dotenv
+   EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=...
+   EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=...
+   ```
+
+   Los valores de Firebase Web y los client IDs son configuración pública de
+   cliente; **no** agregues client secrets, service-account JSON ni tokens.
+6. En el `.env` de la raíz configura el mismo `NEWS_FIREBASE_PROJECT_ID`. La API y
+   el chat validan firma, issuer, audience, proyecto y expiración del ID token.
+   La verificación usa certificados públicos y no requiere una clave de servicio.
+7. En la base `ai_assisted_news`, una cuenta autorizada puede pasar a admin solo
+   después de que la persona haya iniciado sesión y exista `users.firebaseUid`:
+
+   ```javascript
+   db.users.updateOne(
+     { firebaseUid: "<UID de Firebase>" },
+     { $set: { role: "admin", updatedAt: new Date() } }
+   )
+   ```
+
+   Hazlo desde una sesión administrativa segura de MongoDB; nunca aceptes el rol
+   desde el request del frontend.
+
+8. Para Google nativo, genera un **dev client propio** con EAS (no funciona en
+   Expo Go):
+
    ```bash
    npx eas-cli@latest build --profile development --platform android
    ```
-   Instalá el APK resultante en el Android en lugar de Expo Go.
+   Instala el build en el dispositivo. Para iOS físico se necesita una build
+   firmada con el bundle ID configurado.
 
-**Por qué no alcanza con Expo Go:** los client ID de tipo Android/iOS de
-Google validan el paquete/bundle id y la firma de la app real, no el
-contenedor genérico de Expo Go — por eso el botón de Google solo completa el
-login dentro de tu propio dev client.
-
-**Sobre iPhone sin Mac:** Expo Go te deja mostrar toda la interfaz (login de
-invitado, feed, navegación) en un iPhone real sin Mac ni cuenta de Apple de
-pago. Para instalar un dev client propio (necesario para Google real) en un
-iPhone físico, Apple exige firma de código: o una Mac con Xcode, o una cuenta
-de Apple Developer de pago ($99/año) para distribución ad-hoc/TestFlight. Sin
-eso, el login de invitado es la vía para demostrar la experiencia en iOS.
+La sesión Firebase restaura el acceso; el backend crea/recupera el usuario por UID.
+Los usuarios provisionales `google:...`, `guest:...` y `local-admin:...` no se
+fusionan automáticamente ni se borran.
 
 ## Comandos
 
@@ -143,7 +162,8 @@ frontend/
 │   │   ├── auth/           # LoginScreen
 │   │   └── news/           # NewsFeedScreen
 │   └── services/
-│       ├── googleAuth.ts   # OAuth con Google + sesión de invitado
+│       ├── googleAuth.ts   # Firebase Auth: Google web/native y guest anonymous
+│       ├── firebaseClient.ts # configuración y persistencia Firebase
 │       └── newsService.ts  # feed desde API local/MongoDB
 └── tests/
     └── newsService.test.ts

@@ -93,8 +93,10 @@ def test_create_news_document_inserts_news_author_and_audit_log() -> None:
         sourceName="Fuente local",
         sourceUrl="https://example.com/noticia",
     )
+    actor = {"_id": ObjectId(), "firebaseUid": "firebase-admin", "role": "admin"}
+    db["users"].insert_one(actor)
 
-    document = _create_news_document(db, payload, "admin")
+    document = _create_news_document(db, payload, actor)
 
     assert document["slug"] == "nueva-noticia-manual"
     assert document["status"] == "published"

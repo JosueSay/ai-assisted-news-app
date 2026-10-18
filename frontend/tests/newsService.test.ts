@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NewsArticle } from "../src/types";
 import {
   fetchNewsFeedWithStatus,
+  fetchAuthenticatedProfile,
   getArticleBySlug,
   getFeaturedArticles,
   searchArticles,
@@ -66,6 +67,25 @@ afterEach(() => {
 });
 
 describe("newsService", () => {
+  it("resolves the server profile with a Firebase ID token", async () => {
+    const profile = {
+      id: "mongo-user-id",
+      firebaseUid: "firebase-user-id",
+      email: "reader@example.test",
+      displayName: "Reader",
+      photoUrl: "",
+      role: "user",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => profile });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await fetchAuthenticatedProfile("verified-id-token")).toEqual(profile);
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/auth\/me$/);
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe(
+      "Bearer verified-id-token",
+    );
+  });
+
   it("fetches the feed from the configured API without local fallback data", async () => {
     vi.stubGlobal(
       "fetch",

@@ -1,7 +1,6 @@
-import type { AppUser } from "../types";
-
 import type { ResponseStrategy, ResponseIntent, ConfidenceLevel, VerificationStatus }
   from "../generated/newsContract";
+import { getCurrentFirebaseIdToken } from "./firebaseClient";
 
 export type ChatStrategy = ResponseStrategy;
 export type ChatIntent = ResponseIntent;
@@ -34,7 +33,6 @@ export type ChatReply = {
 
 export type ChatSendInput = {
   message: string;
-  user: AppUser;
   sessionId?: string | null;
   newsId?: string | null;
   locationId?: string | null;
@@ -44,15 +42,6 @@ export type ChatSendInput = {
 const ASSISTANT_API_BASE_URL =
   process.env.EXPO_PUBLIC_ASSISTANT_API_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:8010";
 
-/**
- * Identificador externo provisional que la API guarda en users.firebaseUid
- * mientras Firebase Authentication no esté implementado.
- */
-export function chatExternalUserId(user: AppUser): string {
-  if (user.role === "admin") return user.id;
-  return `${user.isGuest ? "guest" : "google"}:${user.id}`;
-}
-
 /** Una sesión vence en el servidor a la hora; se descarta antes de reenviarla. */
 export function isSessionActive(expiresAt: string | null, now: Date = new Date()): boolean {
   if (!expiresAt) return false;
@@ -60,23 +49,18 @@ export function isSessionActive(expiresAt: string | null, now: Date = new Date()
 }
 
 export async function sendChatMessage(input: ChatSendInput): Promise<ChatReply> {
+  const idToken = await getCurrentFirebaseIdToken();
   const response = await fetch(`${ASSISTANT_API_BASE_URL}/chat`, {
     method: "POST",
     headers: {
+      Authorization: `Bearer ${idToken}`,
       "Content-Type": "application/json",
-      ...(input.user.adminToken ? { Authorization: `Bearer ${input.user.adminToken}` } : {}),
     },
     body: JSON.stringify({
       message: input.message,
       sessionId: input.sessionId ?? null,
       newsId: input.newsId ?? null,
       locationId: input.locationId ?? null,
-      user: {
-        id: chatExternalUserId(input.user),
-        displayName: input.user.name,
-        email: input.user.email,
-        photoUrl: input.user.photoUrl ?? "",
-      },
     }),
   });
   if (!response.ok) {

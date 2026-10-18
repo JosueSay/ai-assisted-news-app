@@ -21,20 +21,18 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from bson import ObjectId
-from news.identity import admin_author_id, admin_external_id
+from news.firebase_auth import FirebaseIdentity
 from news.models import (
     AiFeature,
     ConfidenceLevel,
     MessageRole,
     ResponseIntent,
     ResponseStrategy,
-    UserRole,
 )
 from news.models.ai_usage import AiUsage
 from news.models.chat_session import ChatSession, Message, ResponseMetadata
-from news.models.user import User
 from news.presentation import topic_label
-from pymongo.errors import DuplicateKeyError
+from news.user_accounts import UserAccountError, ensure_news_user_async
 
 from ..config import ChatbotConfigurationError, Settings
 from ..prompts import load_system_prompt
@@ -149,13 +147,34 @@ class NewsChatService:
     # Flujo principal
     # ------------------------------------------------------------------
 
-    async def reply(self, request: ChatRequest, *, admin_username: str | None = None) -> ChatReply:
+    async def reply(
+        self, request: ChatRequest, *, identity: FirebaseIdentity
+    ) -> ChatReply:
         now = self._clock()
         session_id = _optional_object_id(request.sessionId, "sessionId")
         news_id = _optional_object_id(request.newsId, "newsId")
         location_id = _optional_object_id(request.locationId, "locationId")
 
-        user = await self._ensure_user(request, location_id, now, admin_username=admin_username)
+        try:
+            user = await ensure_news_user_async(
+                self._db,
+                identity,
+                default_location_code=self._settings.default_location_code,
+                now=now,
+            )
+        except UserAccountError as error:
+            raise NewsChatRequestError(str(error), 503) from error
+        if location_id is not None:
+            location = await self._db["locations"].find_one(
+                {"_id": location_id, "active": True}, {"_id": 1}
+            )
+            if location is None:
+                raise NewsChatRequestError("La ubicación seleccionada no existe.", 400)
+            if location_id != user.get("simulatedLocationId"):
+                await self._db["users"].update_one(
+                    {"_id": user["_id"]}, {"$set": {"simulatedLocationId": location_id}}
+                )
+                user["simulatedLocationId"] = location_id
         session = await self._load_or_create_session(session_id, user, now)
 
         query = resolve_message(
@@ -251,73 +270,6 @@ class NewsChatService:
     # ------------------------------------------------------------------
     # Usuario, ubicación y sesión
     # ------------------------------------------------------------------
-
-    async def _default_location_id(self) -> ObjectId:
-        locations = self._db["locations"]
-        location = await locations.find_one(
-            {"countryCode": self._settings.default_location_code, "active": True}, {"_id": 1}
-        ) or await locations.find_one({"active": True}, {"_id": 1})
-        if location is None:
-            raise NewsChatRequestError(
-                "No hay ubicaciones activas. Ejecutá make db-seed-catalog.", 503
-            )
-        return location["_id"]
-
-    async def _ensure_user(
-        self,
-        request: ChatRequest,
-        location_id: ObjectId | None,
-        now: datetime,
-        *,
-        admin_username: str | None = None,
-    ) -> dict[str, Any]:
-        external_id = request.user.id
-        is_admin = external_id.startswith(("admin:", "local-admin:"))
-        if is_admin:
-            if not admin_username or external_id not in {
-                f"admin:{admin_username}",
-                admin_external_id(admin_username),
-            }:
-                raise NewsChatRequestError("Token admin válido requerido para esta identidad.", 401)
-            external_id = admin_external_id(admin_username)
-        if location_id is not None:
-            location = await self._db["locations"].find_one(
-                {"_id": location_id, "active": True}, {"_id": 1}
-            )
-            if location is None:
-                raise NewsChatRequestError("La ubicación seleccionada no existe.", 400)
-
-        users = self._db["users"]
-        existing = await users.find_one({"firebaseUid": external_id})
-        if existing is None:
-            identity = {"_id": admin_author_id(admin_username)} if is_admin else {}
-            document = User(
-                **identity,
-                firebaseUid=external_id,
-                email=request.user.email,
-                displayName=request.user.displayName,
-                photoUrl=request.user.photoUrl,
-                role=UserRole.admin if is_admin else UserRole.user,
-                simulatedLocationId=location_id or await self._default_location_id(),
-                createdAt=now,
-                updatedAt=now,
-                lastLoginAt=now,
-            ).model_dump_mongo()
-            try:
-                await users.insert_one(document)
-                return document
-            except DuplicateKeyError:
-                existing = await users.find_one({"firebaseUid": external_id})
-                if existing is None:
-                    raise
-
-        changes: dict[str, Any] = {"lastLoginAt": now, "updatedAt": now}
-        if is_admin:
-            changes["role"] = UserRole.admin
-        if location_id is not None and location_id != existing.get("simulatedLocationId"):
-            changes["simulatedLocationId"] = location_id
-        await users.update_one({"_id": existing["_id"]}, {"$set": changes})
-        return {**existing, **changes}
 
     async def _load_or_create_session(
         self, session_id: ObjectId | None, user: dict[str, Any], now: datetime
@@ -691,7 +643,7 @@ class NewsChatService:
                 message=message,
                 previous_response_id=None,
                 context=context,
-                user_id=request.user.id,
+                user_id=user["firebaseUid"],
                 history=history,
             )
         except OpenAIProviderError:

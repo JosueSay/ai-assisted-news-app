@@ -3,31 +3,16 @@
 from __future__ import annotations
 
 from news.models import ConfidenceLevel, ResponseIntent, ResponseStrategy
-from pydantic import BaseModel, Field, field_validator
-
-# Identificador externo provisional mientras Firebase Authentication no esté
-# implementado: "<proveedor>:<id>", por ejemplo "google:1234" o "guest:<uuid>".
-EXTERNAL_ID_PATTERN = r"^[a-z][a-z0-9-]*:[A-Za-z0-9._@:-]{1,160}$"
-
-
-class ChatUserPayload(BaseModel):
-    id: str = Field(pattern=EXTERNAL_ID_PATTERN)
-    displayName: str = Field(min_length=1, max_length=120)
-    email: str = Field(default="", max_length=254)
-    photoUrl: str = Field(default="", max_length=2000)
-
-    @field_validator("id", "displayName", "email", "photoUrl", mode="before")
-    @classmethod
-    def strip_value(cls, value):
-        return value.strip() if isinstance(value, str) else value
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     message: str = Field(min_length=1, max_length=2000)
     sessionId: str | None = Field(default=None, max_length=24)
     newsId: str | None = Field(default=None, max_length=24)
     locationId: str | None = Field(default=None, max_length=24)
-    user: ChatUserPayload
 
     @field_validator("message", mode="before")
     @classmethod

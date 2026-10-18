@@ -68,5 +68,4 @@ export type AppUser = {
   photoUrl?: string;
   isGuest: boolean;
   role?: UserRole;
-  adminToken?: string;
 };

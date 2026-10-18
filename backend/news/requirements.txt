@@ -3,3 +3,4 @@ pymongo>=4.13,<5
 python-dotenv>=1.1,<2
 fastapi>=0.125,<1
 uvicorn[standard]>=0.38,<1
+google-auth>=2.20,<3

@@ -21,7 +21,8 @@ backend/news/
 ├── check_config.py          # Verificación de configuración (CLI)
 ├── ping.py                  # Prueba de conectividad (CLI)
 ├── api.py                   # API HTTP local de noticias
-├── auth.py                  # Autenticación admin local (preexistente, fuera del alcance DB)
+├── firebase_auth.py         # Verificación de Firebase ID tokens sin service-account key
+├── user_accounts.py         # Resolución de users por UID Firebase verificado
 ├── seed_catalog.py        # Seeder idempotente del catálogo locations (16 países)
 ├── seed_demo.py           # Seeder idempotente de noticias demo locales
 ├── demo_news.py           # Generador determinista de 32 noticias demo (Loop 05)
@@ -78,8 +79,10 @@ backend/news/
     ├── test_reseed.py             # reseed seguro: confirmación, ownership, dry-run, orden, preservación, fallos (Loop 06)
     ├── test_bootstrap.py          # bootstrap idempotente sin deletes (Loop 06)
     ├── test_verify.py             # verificación solo-lectura y sus drifts (Loop 06)
-    ├── test_api.py                # adaptación de documentos MongoDB a la API (preexistente)
-    ├── test_auth.py               # autenticación admin local offline (preexistente)
+    ├── test_api.py                # adaptación de documentos MongoDB a la API
+    ├── test_api_firebase_auth.py  # identidad y autorización de rutas protegidas
+    ├── test_firebase_auth.py      # validación offline de claims/token
+    ├── test_user_accounts.py      # upsert seguro por UID Firebase
     └── test_seed_demo.py          # seeder demo legacy con upsert (preexistente, previo al Loop 05)
 ```
 
@@ -119,6 +122,7 @@ modifica ni elimina) y se inspecciona sin escribir con `make db-seed-check`. El
 
 - Python 3.10+
 - PyMongo
+- google-auth (verificación de firma Firebase por certificados públicos)
 - python-dotenv
 - Pydantic
 
@@ -166,8 +170,8 @@ NEWS_LOCAL_MONGO_PORT=27018
 make setup-keys
 ```
 
-Esto crea `keys/mongodb_uri`, `keys/client_id` y `keys/client_secret` si no existen. En modo
-Atlas, completa manualmente `keys/mongodb_uri` con la URI de conexión.
+Esto crea `keys/mongodb_uri` y `keys/openai_api_key` si no existen. En modo Atlas,
+completa manualmente `keys/mongodb_uri` con la URI de conexión.
 
 En modo local, `keys/mongodb_uri` no se necesita.
 
@@ -185,6 +189,7 @@ Variables disponibles:
 | `NEWS_MONGODB_REQUIRED` | `true` | Si es obligatoria para operar |
 | `NEWS_MONGODB_TIMEOUT_MS` | `5000` | Timeout de conexión en ms |
 | `NEWS_LOCAL_MONGO_PORT` | `27018` | Puerto del MongoDB local expuesto al host |
+| `NEWS_FIREBASE_PROJECT_ID` | vacío | Project ID esperado al verificar Firebase ID tokens |
 
 ## Comandos disponibles (Makefile)
 
@@ -230,7 +235,14 @@ Endpoints:
 GET /health
 GET /news
 GET /news/{slug}
+GET /auth/me                 # Bearer Firebase ID token requerido; resuelve users.firebaseUid
+POST /admin/news             # Bearer Firebase ID token + users.role=admin requerido
 ```
+
+La verificación valida firma, audience, issuer, expiración y Project ID con los
+certificados públicos de Firebase. No requiere service-account JSON ni permisos IAM
+para verificar firmas. `/auth/me` crea un usuario regular si no existe; el rol no se
+toma del token ni del request.
 
 `/news` devuelve documentos adaptados al contrato del frontend. No cambia la estructura de la
 base: lee desde `news`, busca el autor en `users` y deriva la categoría desde `news.topics`.
@@ -254,10 +266,12 @@ muestra un estado de error. El frontend no mantiene un dataset local como fallba
 
 ## Separación respecto de assistant/
 
-- `backend/news/` es independiente de `backend/assistant/`.
+- `backend/news/` conserva su DB independiente de `backend/assistant/`; el modo news del
+  chat reutiliza deliberadamente el verificador Firebase y los modelos de este módulo.
 - La base de datos por defecto es `ai_assisted_news`, no `assistant`.
-- No reutiliza modelos, repositorios ni configuración del asistente.
-- No modifica `backend/assistant/` en absoluto.
+- No reutiliza la base `assistant`, colecciones ni repositorios históricos.
+- La autenticación del chat news comparte el Firebase ID token; los otros modos del assistant
+  (`projection` y `novu`) conservan su comportamiento.
 
 ## Seguridad
 
@@ -290,6 +304,8 @@ y el catálogo de 14 topics. `make news-contract` genera el catálogo/tipos Expo
 `make news-contract-check` detecta drift sin DB ni credenciales. El detalle por
 slug permite abrir citas fuera de la página del feed.
 
-El administrador de publicación y chat usa `local-admin:<username>` y el mismo
-token; no se migran ni eliminan usuarios antiguos automáticamente. Ver
+Publicación y chat usan la misma identidad Firebase verificada. Para habilitar una
+cuenta admin, primero inicia sesión y deja que `/auth/me` cree su usuario; después
+una persona autorizada asigna `users.role=admin` en MongoDB. Los usuarios provisionales
+se conservan sin asociación automática. Ver
 [contrato compartido](../../docs/architecture/contrato-compartido-noticias.md).

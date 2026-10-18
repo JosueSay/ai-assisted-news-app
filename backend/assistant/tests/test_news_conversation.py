@@ -5,6 +5,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from news.firebase_auth import FirebaseIdentity
 from news.models import ResponseIntent, ResponseStrategy
 
 from assistant.config import get_settings
@@ -45,14 +46,20 @@ def settings():
     )
 
 
-def request(message, session_id=None, *, user="guest:conversation"):
-    return ChatRequest(
-        message=message, sessionId=session_id, user={"id": user, "displayName": "Fixture"}
-    )
+TEST_IDENTITY = FirebaseIdentity("firebase-conversation", display_name="Fixture")
+
+
+def request(message, session_id=None):
+    return ChatRequest(message=message, sessionId=session_id)
+
+
+class _ServiceWithTestIdentity(NewsChatService):
+    async def reply(self, request, *, identity=TEST_IDENTITY):
+        return await super().reply(request, identity=identity)
 
 
 def chat(db, settings, provider=None, *, now=NOW):
-    return NewsChatService(settings, lambda: provider, db, clock=lambda: now)
+    return _ServiceWithTestIdentity(settings, lambda: provider, db, clock=lambda: now)
 
 
 async def test_affirmative_followup_reaches_llm_with_the_previous_offer_and_citations(
@@ -140,7 +147,8 @@ async def test_ordinal_detail_selects_the_previous_second_article(database, sett
 async def test_followups_never_reuse_another_users_or_expired_session(database, settings):
     first = await chat(database, settings).reply(request("Noticias de México"))
     other = await chat(database, settings).reply(
-        request("ok si hazlo", first.sessionId, user="guest:other")
+        request("ok si hazlo", first.sessionId),
+        identity=FirebaseIdentity("firebase-other", display_name="Other"),
     )
     expired = await chat(database, settings, now=NOW + timedelta(seconds=3601)).reply(
         request("ok si hazlo", first.sessionId)

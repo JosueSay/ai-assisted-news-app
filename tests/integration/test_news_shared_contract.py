@@ -29,21 +29,37 @@ def test_canonical_bootstrap_api_chat_and_admin_share_one_schema(monkeypatch, tm
         "MONGODB_REQUIRED": "true",
         "OPENAI_API_KEY_FILE": str(tmp_path / "missing_openai"),
         "API_GPT": "",
-        "NEWS_ADMIN_USERNAME": "admin",
+        "NEWS_FIREBASE_PROJECT_ID": "firebase-contract-test",
     }.items():
         monkeypatch.setenv(key, value)
-    password_file = tmp_path / "admin_fixture"
-    password_file.write_text("fixture-only-password", encoding="utf-8")
-    monkeypatch.setenv("NEWS_ADMIN_PASSWORD_FILE", str(password_file))
 
     from assistant.app import create_app as create_chat_app
     from assistant.config import get_settings
     from news.api import create_app
     from news.bootstrap import bootstrap_data
     from news.config import get_news_settings
-    from news.identity import admin_author_id
+    from news.firebase_auth import FirebaseAuthenticationError, FirebaseIdentity
     from news.schema.check import check_schema
     from news.topics import TOPICS
+
+    test_tokens = {
+        "Bearer reader-test-token": FirebaseIdentity(
+            "firebase-reader", "reader@example.test", "Reader"
+        ),
+        "Bearer admin-test-token": FirebaseIdentity(
+            "firebase-admin", "admin@example.test", "Admin"
+        ),
+    }
+
+    def verify_test_token(authorization, project_id):
+        if project_id != "firebase-contract-test" or authorization not in test_tokens:
+            raise FirebaseAuthenticationError("invalid fixture token")
+        return test_tokens[authorization]
+
+    monkeypatch.setattr("news.api.verify_firebase_bearer", verify_test_token)
+    monkeypatch.setattr("assistant.app.verify_firebase_bearer", verify_test_token)
+    reader_headers = {"Authorization": "Bearer reader-test-token"}
+    admin_headers = {"Authorization": "Bearer admin-test-token"}
 
     get_news_settings.cache_clear()
     get_settings.cache_clear()
@@ -72,6 +88,7 @@ def test_canonical_bootstrap_api_chat_and_admin_share_one_schema(monkeypatch, tm
         with TestClient(create_app()) as api, TestClient(create_chat_app()) as chat:
             assert api.get("/health").json()["mongodbConnected"]
             assert chat.get("/health").json()["mongodb_connected"]
+            assert api.get("/auth/me", headers=reader_headers).status_code == 200
             articles = api.get("/news").json()
             assert len(articles) == 28
             assert set().union(*(set(a["topics"]) for a in articles)) == set(TOPICS)
@@ -91,8 +108,8 @@ def test_canonical_bootstrap_api_chat_and_admin_share_one_schema(monkeypatch, tm
                     "/chat",
                     json={
                         "message": f"Noticias de {topic.replace('_', ' ')}",
-                        "user": {"id": "guest:integration", "displayName": "Fixture"},
                     },
+                    headers=reader_headers,
                 )
                 assert response.status_code == 200, response.text
                 citations = response.json()["message"]["citedNews"]
@@ -111,8 +128,8 @@ def test_canonical_bootstrap_api_chat_and_admin_share_one_schema(monkeypatch, tm
                     "/chat",
                     json={
                         "message": message,
-                        "user": {"id": "guest:db-query", "displayName": "Fixture"},
                     },
+                    headers=reader_headers,
                 )
                 assert response.status_code == 200, response.text
                 return response.json()["message"]
@@ -167,8 +184,8 @@ def test_canonical_bootstrap_api_chat_and_admin_share_one_schema(monkeypatch, tm
                     json={
                         "message": text,
                         "sessionId": session_id,
-                        "user": {"id": "guest:followup", "displayName": "Fixture"},
                     },
+                    headers=reader_headers,
                 )
                 assert response.status_code == 200, response.text
                 body = response.json()
@@ -191,15 +208,15 @@ def test_canonical_bootstrap_api_chat_and_admin_share_one_schema(monkeypatch, tm
                 "Consultas MongoDB: conteos 32/28/4 y 37/33/4; todos los países publicados cubiertos"
             )
 
-            token = api.post(
-                "/admin/login",
-                json={"username": "admin", "password": "fixture-only-password"},
-            ).json()["accessToken"]
-            headers = {"Authorization": f"Bearer {token}"}
+            admin_profile = api.get("/auth/me", headers=admin_headers)
+            assert admin_profile.status_code == 200
+            database.users.update_one(
+                {"firebaseUid": "firebase-admin"}, {"$set": {"role": "admin"}}
+            )
             location_id = api.get("/locations").json()[0]["id"]
             created = api.post(
                 "/admin/news",
-                headers=headers,
+                headers=admin_headers,
                 json={
                     "title": "Fixture de integración",
                     "summary": "Resumen de prueba",
@@ -214,20 +231,18 @@ def test_canonical_bootstrap_api_chat_and_admin_share_one_schema(monkeypatch, tm
             assert "38 noticias" in changed_counts["content"]
             assert "33 publicadas" in changed_counts["content"]
             assert "5 borradores" in changed_counts["content"]
-            payload = {
-                "message": "noticias",
-                "user": {"id": "admin:admin", "displayName": "Admin"},
-            }
-            assert chat.post("/chat", json=payload).status_code == 401
-            assert chat.post("/chat", json=payload, headers=headers).status_code == 200
-            assert (
-                database.users.count_documents({"firebaseUid": "local-admin:admin"})
-                == 1
-            )
+            payload = {"message": "noticias", "user": {"id": "admin:admin", "role": "admin"}}
+            assert chat.post("/chat", json={"message": "noticias"}).status_code == 401
+            assert chat.post("/chat", json=payload, headers=admin_headers).status_code == 422
+            assert chat.post(
+                "/chat", json={"message": "noticias"}, headers=admin_headers
+            ).status_code == 200
+            assert database.users.count_documents({"firebaseUid": "local-admin:admin"}) == 0
             assert database.users.count_documents({"firebaseUid": "admin:admin"}) == 0
-            author = database.users.find_one({"_id": admin_author_id("admin")})
+            author = database.users.find_one({"firebaseUid": "firebase-admin"})
             assert author["role"] == "admin"
-            assert database.chatSessions.count_documents({"userId": author["_id"]}) == 1
+            assert database.news.find_one({"slug": "fixture-de-integracion"})["authorId"] == author["_id"]
+            assert database.chatSessions.count_documents({"userId": author["_id"]}) >= 1
             assert database.aiUsage.count_documents({}) == 0
             assert check_schema(database).ok
             print("Admin compartido y validators/índices/TTL: OK; sin llamadas a IA")

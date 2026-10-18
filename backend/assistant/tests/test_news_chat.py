@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from bson import ObjectId
+from news.firebase_auth import FirebaseIdentity
 from news.models import (
     ConfidenceLevel,
     ImageType,
@@ -34,6 +35,9 @@ NOW = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
 AUTHOR_ID = ObjectId("670000000000000000000002")
 GT = CATALOG_LOCATION_IDS["GT"]
 MX = CATALOG_LOCATION_IDS["MX"]
+TEST_IDENTITY = FirebaseIdentity(
+    "guest-abc-123", "invitado@example.test", "Invitado"
+)
 
 
 @pytest.fixture
@@ -123,14 +127,18 @@ async def db() -> FakeDatabase:
 def chat_request(message: str, **overrides) -> ChatRequest:
     payload = {
         "message": message,
-        "user": {"id": "guest:abc-123", "displayName": "Invitado", "email": "invitado@local.news"},
     }
     payload.update(overrides)
     return ChatRequest.model_validate(payload)
 
 
+class _ServiceWithDefaultTestIdentity(NewsChatService):
+    async def reply(self, request, *, identity=TEST_IDENTITY):
+        return await super().reply(request, identity=identity)
+
+
 def service(db, settings, provider=None, clock=lambda: NOW) -> NewsChatService:
-    return NewsChatService(settings, lambda: provider, db, clock=clock)
+    return _ServiceWithDefaultTestIdentity(settings, lambda: provider, db, clock=clock)
 
 
 # ----------------------------------------------------------------------
@@ -189,7 +197,7 @@ async def test_recent_news_without_llm_uses_database_and_persists_session(db, st
     assert db["aiUsage"].documents == []
 
     user = db["users"].documents[0]
-    assert user["firebaseUid"] == "guest:abc-123"
+    assert user["firebaseUid"] == TEST_IDENTITY.uid
     assert user["simulatedLocationId"] == GT
 
 
@@ -306,11 +314,8 @@ async def test_sessions_are_reused_only_while_valid_and_by_owner(db, stub_settin
         chat_request("noticias", sessionId=first.sessionId)
     )
     other = await service(db, stub_settings).reply(
-        chat_request(
-            "noticias",
-            sessionId=first.sessionId,
-            user={"id": "google:999", "displayName": "Otra persona"},
-        )
+        chat_request("noticias", sessionId=first.sessionId),
+        identity=FirebaseIdentity("other-firebase-uid", display_name="Otra persona"),
     )
 
     assert second.sessionId == first.sessionId
@@ -481,7 +486,6 @@ def test_confidence_levels() -> None:
     assert compute_confidence([]).level == ConfidenceLevel.low
 
 
-@pytest.mark.parametrize("user_id", ["sin-prefijo", "Google:1", "guest:", "guest:con espacio"])
-def test_chat_request_rejects_invalid_external_ids(user_id: str) -> None:
+def test_chat_request_rejects_client_supplied_identity() -> None:
     with pytest.raises(ValueError):
-        chat_request("hola", user={"id": user_id, "displayName": "X"})
+        ChatRequest.model_validate({"message": "hola", "user": {"id": "admin", "role": "admin"}})

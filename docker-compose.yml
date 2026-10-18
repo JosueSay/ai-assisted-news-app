@@ -38,6 +38,7 @@ services:
       NEWS_MONGODB_TIMEOUT_MS: ${NEWS_MONGODB_TIMEOUT_MS:-5000}
       NEWS_MONGODB_URI_FILE: /app/keys/mongodb_uri
       NEWS_MONGODB_LOCAL_URI: mongodb://news-mongo:27017/${NEWS_MONGODB_DATABASE:-ai_assisted_news}
+      NEWS_FIREBASE_PROJECT_ID: ${NEWS_FIREBASE_PROJECT_ID:-}
       CHAT_SESSION_TTL_SECONDS: ${CHAT_SESSION_TTL_SECONDS:-3600}
       NEWS_AI_BUDGET_USD: ${NEWS_AI_BUDGET_USD:-20}
       NEWS_CHAT_INPUT_USD_PER_MILLION: ${NEWS_CHAT_INPUT_USD_PER_MILLION:-}
@@ -141,9 +142,6 @@ services:
       NEWS_MONGODB_TIMEOUT_MS: ${NEWS_MONGODB_TIMEOUT_MS:-5000}
       NEWS_MONGODB_URI_FILE: /app/keys/mongodb_uri
       NEWS_MONGODB_LOCAL_URI: mongodb://news-mongo:27017/${NEWS_MONGODB_DATABASE:-ai_assisted_news}
-      NEWS_ADMIN_USERNAME: ${NEWS_ADMIN_USERNAME:-admin}
-      NEWS_ADMIN_PASSWORD_FILE: /app/keys/news_admin_password
-      NEWS_ADMIN_TOKEN_TTL_SECONDS: ${NEWS_ADMIN_TOKEN_TTL_SECONDS:-3600}
       PYTEST_ADDOPTS: -p no:cacheprovider
     volumes:
       - ./backend:/app/backend
@@ -175,9 +173,7 @@ services:
       NEWS_MONGODB_TIMEOUT_MS: ${NEWS_MONGODB_TIMEOUT_MS:-5000}
       NEWS_MONGODB_URI_FILE: /app/keys/mongodb_uri
       NEWS_MONGODB_LOCAL_URI: mongodb://news-mongo:27017/${NEWS_MONGODB_DATABASE:-ai_assisted_news}
-      NEWS_ADMIN_USERNAME: ${NEWS_ADMIN_USERNAME:-admin}
-      NEWS_ADMIN_PASSWORD_FILE: /app/keys/news_admin_password
-      NEWS_ADMIN_TOKEN_TTL_SECONDS: ${NEWS_ADMIN_TOKEN_TTL_SECONDS:-3600}
+      NEWS_FIREBASE_PROJECT_ID: ${NEWS_FIREBASE_PROJECT_ID:-}
       NEWS_API_ALLOWED_ORIGINS: ${NEWS_API_ALLOWED_ORIGINS:-http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006,http://127.0.0.1:19006}
     ports:
       - "${NEWS_API_PORT:-8020}:8020"
