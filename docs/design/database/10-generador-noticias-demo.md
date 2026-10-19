@@ -14,7 +14,9 @@ atribuyen hechos a organizaciones, gobiernos, medios ni personas reales. Los
 actores son colectivos y vecinos ficticios en localidades demo; las fuentes
 son ficticias (`Demo News Source N`) con URLs reservadas
 (`https://example.com/demo/...`); cada `verification.notes` lo declara
-explícitamente. No intervienen IA, red ni APIs externas.
+explícitamente. El generador no realiza llamadas de red ni a APIs de IA: las
+URLs de imagen son fixtures versionadas de Wikimedia Commons, documentadas en
+[Imágenes del dataset demo](13-imagenes-demo.md).
 
 ## Las 32 noticias
 
@@ -62,12 +64,15 @@ fact checking: la contradicción es deliberada para probar incertidumbre.
 
 ## Imágenes
 
-Sin imágenes reales: fixtures `photograph`, `illustration`, `ai_generated`,
-`ai_modified` y `none` (todas presentes). Las `ai_*` llevan `aiDisclosure`;
-las `none` tienen `url` y `alt` nulos; las URLs son placeholders
-`https://example.com/demo/img/...`. `aiAssistance.imageGenerated` coincide
+23 noticias tienen imagen visible y 9 no (`none`, con `url` y `alt` nulos).
+Distribución: 9 `photograph`, 10 `illustration`, 4 `ai_generated` y ninguna
+`ai_modified`. Las imágenes provienen de Wikimedia Commons, con URL HTTPS
+determinista, crédito con la página `File:` y derechos con la licencia
+verificada. Las `ai_generated` llevan `aiDisclosure`; las fotografías e
+ilustraciones no. Todas se declaran representaciones ilustrativas que no
+documentan el acontecimiento ficticio. `aiAssistance.imageGenerated` coincide
 con `image.type == ai_generated`. No se registra `aiUsage` porque no hubo
-llamadas IA.
+llamadas IA. Detalle en [Imágenes del dataset demo](13-imagenes-demo.md).
 
 ## Tiempo de lectura
 
@@ -97,18 +102,20 @@ otras colecciones (en particular, nunca en `users`).
 
 `make db-news-check` solo lee y reporta cantidad, slugs únicos, cobertura de
 16 países con 2 noticias cada uno, topics válidos y su cobertura, estados,
-verificación, coherencia de imágenes y tiempos de lectura, además de
-documentos ajenos (se reportan, nunca se borran).
+verificación, coherencia de imágenes (incluido drift del bloque `image`
+completo frente a la fixture) y tiempos de lectura, además de documentos ajenos
+(se reportan, nunca se borran).
 
 ## Comandos
 
 ```bash
-make db-test            # suite offline, sin Atlas
+make db-test            # suite offline, sin Atlas ni red
 make db-init            # asegura colecciones, validators e índices
 make db-seed-catalogs   # prerrequisito: catálogo locations
 make db-seed-news       # inserta solo noticias demo faltantes (idempotente)
 make db-seed-news       # segunda ejecución: inserted 0, unchanged 32
 make db-news-check      # inspección no destructiva del dataset
+make db-news-images-check  # check HTTP online de las URLs versionadas (sin DB)
 make db-schema-check    # verifica que el esquema físico no derivó
 ```
 
