@@ -21,6 +21,7 @@ from bson import ObjectId
 from .models import ImageType, LocationLevel, NewsStatus, VerificationStatus
 from .models.news import AiAssistance, GeographicScope, Image, News, Verification
 from .models.reading_time import compute_reading_time
+from .demo_images import get_demo_image
 from .seed_catalog import CATALOG_LOCATION_IDS
 
 EXPECTED_NEWS_COUNT = 32
@@ -68,7 +69,7 @@ def _draft_at(index: int) -> datetime:
     return DEMO_NEWS_BASE_DRAFT_AT + timedelta(hours=index * 11)
 
 
-def _image(image_type: str, slug: str, alt: str) -> dict:
+def _image(image_type: str, slug: str) -> dict:
     if image_type == "none":
         return {
             "url": None,
@@ -78,23 +79,10 @@ def _image(image_type: str, slug: str, alt: str) -> dict:
             "rights": None,
             "aiDisclosure": None,
         }
-    base = {
-        "url": f"https://example.com/demo/img/{slug}.jpg",
-        "alt": alt,
-        "type": image_type,
-        "credit": "Ilustración demo ficticia",
-        "rights": "Fixture sintética; sin derechos de terceros.",
-        "aiDisclosure": None,
-    }
-    if image_type == "ai_generated":
-        base["aiDisclosure"] = (
-            "Imagen demo generada con IA (fixture sintética, sin hechos reales)."
-        )
-    elif image_type == "ai_modified":
-        base["aiDisclosure"] = (
-            "Imagen demo real alterada con IA (fixture sintética, sin hechos reales)."
-        )
-    return base
+    image = get_demo_image(slug)
+    if image["type"] != image_type:
+        raise ValueError(f"Image type differs from reviewed asset: {slug}")
+    return image
 
 
 # Cada especificación define una noticia demo. `paragraphs` es el contenido
@@ -112,7 +100,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "photograph",
-        "image_alt": "Fotografía demo de una parcela ficticia con sensores",
         "sources": [("media", None), ("primary_source", None)],
         "paragraphs": [
             "En una localidad demo de Canadá, un colectivo vecinal ficticio instaló sensores sencillos de humedad en doce parcelas comunitarias. La prueba busca responder una pregunta práctica: cuánta agua necesita cada parcela sin regar por costumbre ni desperdiciar recursos.",
@@ -137,7 +124,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "illustration",
-        "image_alt": "Ilustración demo de una lectura en un parque ficticio",
         "sources": [("official", None), ("media", None)],
         "paragraphs": [
             "Una biblioteca ficticia en una localidad demo de Canadá abrió un club de lectura infantil al aire libre. Las sesiones duran veinte minutos y se celebran en un parque imaginario con mantas y cajas de libros prestados.",
@@ -157,7 +143,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "ai_generated",
-        "image_alt": "Imagen demo generada con IA de un teatrino ficticio",
         "sources": [("media", None), ("witness", None)],
         "paragraphs": [
             "En una localidad demo de México, tres compañías ficticias organizaron un festival breve de teatro barrial con marionetas. El escenario es un patio imaginario con un teatrino armado con cajas y telas reutilizadas.",
@@ -182,7 +167,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "draft",
         "verification": "insufficient_sources",
         "image": "none",
-        "image_alt": "",
         "sources": [("other", None)],
         "paragraphs": [
             "Este borrador ficticio reúne rutinas breves de pausas activas para personas que teletrabajan en un vecindario demo. Cada rutina dura cinco minutos y combina estiramientos de cuello, hombros y muñecas.",
@@ -202,7 +186,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "illustration",
-        "image_alt": "Ilustración demo de puestos de un mercado ficticio",
         "sources": [("official", None), ("media", None)],
         "paragraphs": [
             "En una localidad demo de Guatemala, treinta comercios ficticios participan en un mercado comunitario que muestra productos disponibles por barrio. La plataforma imaginaria no procesa pagos: su primera meta dentro de la ficción es reducir viajes innecesarios.",
@@ -227,7 +210,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "photograph",
-        "image_alt": "Fotografía demo de una cancha vecinal ficticia",
         "sources": [("witness", None), ("media", None)],
         "paragraphs": [
             "Una liga comunitaria ficticia en una localidad demo de Guatemala organizó un torneo corto de fin de semana. Participan equipos juveniles del vecindario imaginario con partidos de treinta minutos.",
@@ -246,8 +228,7 @@ _SPECS: tuple[dict, ...] = (
         "topics": ["medio_ambiente", "ciencia"],
         "status": "published",
         "verification": "developing",
-        "image": "ai_modified",
-        "image_alt": "Imagen demo alterada con IA de una quebrada ficticia",
+        "image": "illustration",
         "sources": [("primary_source", None), ("official", None)],
         "paragraphs": [
             "En una localidad demo de Costa Rica, brigadas vecinales ficticias monitorean tres quebradas urbanas con reglas y fichas de papel. Cada brigada registra el nivel del agua y los residuos visibles dos veces por semana dentro de la ficción.",
@@ -255,7 +236,7 @@ _SPECS: tuple[dict, ...] = (
             "Los datos se pegan en un mapa mural del salón comunal ficticio. Con el mapa a la vista, la asamblea demo prioriza qué tramos limpiar primero y cuántas bolsas y guantes necesita cada jornada.",
             "La noticia sigue en desarrollo dentro de la ficción: faltan cuatro semanas de registros para distinguir variaciones normales de episodios de vertido. Por eso su verificación demo es developing y sus notas lo explican.",
             "El equipo ficticio también anota la fauna observada en cada visita: libélulas, ranas pequeñas y aves que beben en las orillas imaginarias. Esos avistamientos no sustituyen un estudio real, solo enriquecen la actividad vecinal demo.",
-            "Cuando el registro esté completo en la ficción, el colectivo publicará un resumen mural con los tramos más afectados. La historia completa es sintética y prueba contenidos largos, verificación developing e imágenes ai_modified con disclosure.",
+            "Cuando el registro esté completo en la ficción, el colectivo publicará un resumen mural con los tramos más afectados. La historia completa es sintética y prueba contenidos largos, verificación developing e imágenes ilustrativas sin evidencia del evento.",
             "Ninguna quebrada real fue medida: todo el monitoreo pertenece al dataset demo para ejercitar feed por ubicación, topics de medio ambiente y ciencia, y tiempos de lectura de tres minutos o más.",
             "Los turnos de monitoreo rotan entre doce voluntarios ficticios para cubrir los tres tramos demo. Cada pareja recorre su tramo asignado con regla, fichas y bolsas de la prueba.",
             "Una escuela ficticia adoptó el tramo medio como aula abierta dentro de la ficción. Sus estudiantes dibujan el mapa mural y aprenden a distinguir agua clara de agua turbia.",
@@ -278,7 +259,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "illustration",
-        "image_alt": "Ilustración demo de un paseo peatonal ficticio",
         "sources": [("official", None), ("media", None)],
         "paragraphs": [
             "Una municipalidad ficticia abrió un tramo peatonal temporal en una avenida de comercio barrial dentro del escenario demo. El proyecto mide cómo cambia la circulación cuando hay menos autos y más espacio para caminar.",
@@ -298,7 +278,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "photograph",
-        "image_alt": "Fotografía demo de un salón comunal ficticio",
         "sources": [("official", None), ("witness", None)],
         "paragraphs": [
             "En una localidad demo de Argentina, una asamblea vecinal ficticia definió las reglas de uso del salón comunal. Asistieron delegados imaginarios de cada cuadra con propuestas escritas en fichas de colores.",
@@ -323,7 +302,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "conflicting_sources",
         "image": "none",
-        "image_alt": "",
         "sources": [
             ("witness", "La ficha demo A afirma precios bajos estables."),
             ("witness", "La ficha demo B afirma subidas recientes en la ficción."),
@@ -351,7 +329,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "photograph",
-        "image_alt": "Fotografía demo de una caminata ficticia al amanecer",
         "sources": [("official", None), ("primary_source", None)],
         "paragraphs": [
             "En una localidad demo de Brasil, grupos vecinales ficticios organizan caminatas matutinas tres veces por semana. El recorrido imaginario bordea un parque demo con estaciones marcadas cada doscientos metros.",
@@ -383,7 +360,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "developing",
         "image": "ai_generated",
-        "image_alt": "Imagen demo generada con IA de un taller ficticio",
         "sources": [("media", None), ("witness", None)],
         "paragraphs": [
             "En una localidad demo de Brasil, un taller vecinal ficticio repara lámparas y pequeños aparatos del barrio imaginario. Cada sesión atiende diez objetos con turno previo anotado en una pizarra demo.",
@@ -415,7 +391,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "illustration",
-        "image_alt": "Ilustración demo de un taller de escritura ficticio",
         "sources": [("official", None), ("media", None)],
         "paragraphs": [
             "En una localidad demo de Cuba, la biblioteca ficticia abrió talleres de escritura breve para jóvenes. Cada sesión propone un tema inventado y cien palabras como límite dentro de la prueba.",
@@ -435,7 +410,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "insufficient_sources",
         "image": "none",
-        "image_alt": "",
         "sources": [("other", None)],
         "paragraphs": [
             "Este apunte ficticio reúne consejos provisorios sobre hidratación para caminatas cortas en un barrio demo. Sugiere llevar agua, caminar a la sombra y descansar cada veinte minutos dentro de la ficción.",
@@ -455,7 +429,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "photograph",
-        "image_alt": "Fotografía demo de un patio ficticio con instrumentos",
         "sources": [("witness", None), ("media", None)],
         "paragraphs": [
             "En una localidad demo de Jamaica, vecinos ficticios organizaron una noche de música acústica en un patio prestado. Tocan dúos rotativos con guitarra, maracas y cajón dentro del escenario imaginario.",
@@ -480,7 +453,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "none",
-        "image_alt": "",
         "sources": [("witness", None), ("official", None)],
         "paragraphs": [
             "En un barrio demo, una mesa de trueque ficticia intercambia libros y esquejes de plantas sin dinero. Cada objeto lleva una tarjeta inventada con su historia dentro de la prueba.",
@@ -500,7 +472,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "developing",
         "image": "illustration",
-        "image_alt": "Ilustración demo de aves ficticias en una plaza",
         "sources": [("primary_source", None), ("media", None)],
         "paragraphs": [
             "En una localidad demo de España, voluntarios ficticios cuentan aves urbanas en seis plazas imaginarias. Cada observador lleva fichas con siluetas inventadas y anota hora, plaza y comportamiento dentro de la prueba.",
@@ -533,7 +504,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "draft",
         "verification": "conflicting_sources",
         "image": "none",
-        "image_alt": "",
         "sources": [
             ("witness", "La propuesta demo A prioriza talleres matutinos."),
             ("witness", "La propuesta demo B prioriza ensayos nocturnos."),
@@ -556,7 +526,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "photograph",
-        "image_alt": "Fotografía demo de una lectura en una plaza ficticia",
         "sources": [("official", None), ("media", None)],
         "paragraphs": [
             "Bibliotecas de barrio ficticias abrieron una ruta de lectura al aire libre en una localidad demo de Francia. La agenda conecta plazas, parques y patios escolares imaginarios con clubes breves.",
@@ -581,7 +550,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "none",
-        "image_alt": "",
         "sources": [("official", None), ("witness", None)],
         "paragraphs": [
             "En una localidad demo de Francia, vecinos ficticios armaron un directorio de oficios por barrio. Incluye carpinteros, costureras y técnicos inventados con horarios y zonas de atención.",
@@ -601,7 +569,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "illustration",
-        "image_alt": "Ilustración demo de pluviómetros caseros ficticios",
         "sources": [("primary_source", None), ("official", None)],
         "paragraphs": [
             "En una localidad demo de Japón, escuelas ficticias instalaron pluviómetros caseros hechos con botellas graduadas. Cada escuela registra la lluvia diaria en una tabla mural dentro de la prueba.",
@@ -626,7 +593,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "draft",
         "verification": "insufficient_sources",
         "image": "none",
-        "image_alt": "",
         "sources": [("other", None)],
         "paragraphs": [
             "Este borrador ficticio propone una lista de verificación para salidas nocturnas en grupo dentro del barrio demo. Incluye avisar la ruta, llevar linterna y caminar en parejas en la ficción.",
@@ -646,7 +612,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "ai_generated",
-        "image_alt": "Imagen demo generada con IA de una mesa ficticia",
         "sources": [("media", None), ("official", None)],
         "paragraphs": [
             "En una localidad demo de China, un club de cocina ficticio intercambia recetas inventadas con clubes imaginarios de otros países. Cada mes rota un ingrediente base de la prueba: arroz, fideos, calabaza o frijol.",
@@ -679,7 +644,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "developing",
         "image": "photograph",
-        "image_alt": "Fotografía demo de una sesión ficticia en un parque",
         "sources": [("witness", None), ("official", None)],
         "paragraphs": [
             "En una localidad demo de China, un grupo ficticio prueba sesiones de estiramiento en parques al amanecer. Las rutinas duran media hora y las guía un voluntario demo dentro de la ficción.",
@@ -703,14 +667,13 @@ _SPECS: tuple[dict, ...] = (
         "topics": ["cultura", "internacional"],
         "status": "published",
         "verification": "confirmed",
-        "image": "ai_modified",
-        "image_alt": "Imagen demo alterada con IA de postales ficticias",
+        "image": "illustration",
         "sources": [("official", None), ("media", None)],
         "paragraphs": [
             "En una localidad demo de Egipto, escuelas ficticias intercambian postales ilustradas con escuelas imaginarias de otros países. Cada postal dibujada a mano muestra la vida cotidiana del barrio demo.",
             "Los temas rotan cada mes en la ficción: mercados, juegos, transportes y fiestas inventadas. Al reverso, cada clase escribe tres preguntas para sus corresponsales demo.",
             "La muestra anual cuelga las postales en el pasillo de la escuela ficticia. Los visitantes votan con pegatinas cuáles historias les gustaría conocer en persona dentro de la prueba.",
-            "El intercambio es sintético y prueba cultura e internacional con imagen ai_modified y su disclosure. Ninguna escuela real participa.",
+            "El intercambio es sintético y prueba cultura e internacional con una ilustración temática, sin evidencia del evento. Ninguna escuela real participa.",
             "Con remitentes de varios países imaginarios, la fixture demuestra cómo el topic internacional convive con el alcance país de cada noticia.",
             "Los temas mensuales de la ficción cubren mercados, juegos, transportes y fiestas inventadas. Cada clase elige su enfoque y lo dibuja a su manera demo.",
             "La muestra anual colgará las postales en el pasillo de la escuela ficticia. Los visitantes votarán con pegatinas sus historias favoritas de la prueba.",
@@ -729,7 +692,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "conflicting_sources",
         "image": "none",
-        "image_alt": "",
         "sources": [
             ("primary_source", "La ficha demo A afirma ocho horas en la ficción."),
             ("primary_source", "La ficha demo B afirma seis horas en la ficción."),
@@ -752,7 +714,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "photograph",
-        "image_alt": "Fotografía demo de una jornada ficticia en un parque",
         "sources": [("official", None), ("witness", None)],
         "paragraphs": [
             "En una localidad demo de Sudáfrica, brigadas vecinales ficticias organizan jornadas de limpieza en tres parques imaginarios. Cada jornada dura tres horas dentro de la ficción y cierra con un conteo de bolsas.",
@@ -785,7 +746,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "draft",
         "verification": "conflicting_sources",
         "image": "none",
-        "image_alt": "",
         "sources": [
             ("witness", "El esquema demo A propone rondas cortas frecuentes."),
             ("witness", "El esquema demo B propone rondas largas espaciadas."),
@@ -808,7 +768,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "photograph",
-        "image_alt": "Fotografía demo de una rodada ficticia al amanecer",
         "sources": [("official", None), ("witness", None)],
         "paragraphs": [
             "En una localidad demo de Australia, un club ficticio organiza rodadas recreativas de fin de semana. Las rutas imaginarias usan ciclovías demo de baja dificultad con guías en cabeza y cola.",
@@ -833,7 +792,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "illustration",
-        "image_alt": "Ilustración demo de un aula ficticia con equipos",
         "sources": [("official", None), ("primary_source", None)],
         "paragraphs": [
             "En una localidad demo de Australia, vecinos ficticios dictan un curso de reparación básica de computadoras. Las clases se celebran en un aula prestada con equipos donados dentro de la ficción.",
@@ -866,7 +824,6 @@ _SPECS: tuple[dict, ...] = (
         "status": "published",
         "verification": "confirmed",
         "image": "ai_generated",
-        "image_alt": "Imagen demo generada con IA de un simulacro ficticio",
         "sources": [("official", None), ("witness", None)],
         "paragraphs": [
             "En una localidad demo de Nueva Zelanda, vecinos ficticios practicaron un simulacro de evacuación en el centro comunal imaginario. Sonó la alarma de prueba y cada grupo siguió su ruta marcada.",
@@ -890,8 +847,7 @@ _SPECS: tuple[dict, ...] = (
         "topics": ["internacional", "politica"],
         "status": "published",
         "verification": "developing",
-        "image": "ai_modified",
-        "image_alt": "Imagen demo alterada con IA de una plaza ficticia",
+        "image": "illustration",
         "sources": [("official", None), ("media", None)],
         "paragraphs": [
             "En una localidad demo de Nueva Zelanda, la asamblea vecinal ficticia abrió un foro con asambleas imaginarias de otros países. El tema de la prueba: cómo diseñar plazas que inviten a quedarse.",
@@ -899,7 +855,7 @@ _SPECS: tuple[dict, ...] = (
             "Las diferencias también se anotaron en la ficción: unas plazas priorizan mercados semanales y otras canchas pequeñas. El foro demo respeta ambas preferencias sin imponer un modelo único.",
             "La guía común sigue en redacción dentro del escenario, por eso la verificación es developing. Faltan los capítulos de mantenimiento y de turnos de limpieza imaginarios.",
             "Un borrador circuló entre las asambleas de la prueba para comentarios escritos. Cada comentario demo se responde en la siguiente ronda del foro ficticio.",
-            "El foro es sintético y prueba el topic internacional con alcance país. Ninguna asamblea real participa y la imagen alterada lleva su disclosure.",
+            "El foro es sintético y prueba el topic internacional con alcance país. Ninguna asamblea real participa y la ilustración temática no documenta el evento.",
             "Cuando la guía esté lista en la ficción, se imprimirá en cartel para las plazas demo. Hasta entonces, esta fixture ejercita lectura larga y verificación en desarrollo.",
             "El capítulo de mantenimiento propone turnos mensuales por cuadra ficticia. Cada turno demo incluye riego, barrido y revisión de bancas en la prueba.",
             "Los turnos de limpieza se sortean con fichas numeradas en la asamblea imaginaria. Nadie repite turno hasta completar la ronda en la ficción.",
@@ -946,7 +902,7 @@ def build_demo_news() -> list[News]:
         published_at = _published_at(index) if status == NewsStatus.published else None
         stamp = published_at if published_at is not None else _draft_at(index)
         verification_status = VerificationStatus(spec["verification"])
-        image_doc = _image(spec["image"], spec["slug"], spec["image_alt"])
+        image_doc = _image(spec["image"], spec["slug"])
         news = News(
             _id=_spec_news_id(index),
             slug=spec["slug"],

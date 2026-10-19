@@ -1,6 +1,7 @@
 """Tests offline para la inspección no destructiva de noticias demo (Loop 05)."""
 
 from bson import ObjectId
+import pytest
 
 from news.demo_news import get_demo_news_documents
 from news.news_check import check_news_data
@@ -109,3 +110,14 @@ def test_news_check_is_read_only() -> None:
     assert db["news"].insert_calls == inserts_before
     for collection in db.collections.values():
         assert collection.drop_calls == 0
+
+
+@pytest.mark.parametrize("field", ["url", "credit", "rights", "alt", "type", "aiDisclosure"])
+def test_news_check_detects_stale_image_fixture(field) -> None:
+    db = FakeDatabase()
+    seed_news_data(db)
+    doc = next(iter(db["news"].documents.values()))
+    doc["image"][field] = "stale"
+    result = check_news_data(db)
+    assert not result.ok
+    assert doc["slug"] in result.coherence_issues

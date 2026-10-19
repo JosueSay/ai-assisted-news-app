@@ -20,6 +20,7 @@ Bloque de documentos que define el contenido de la base de datos y las reglas qu
 | [10 Generador de noticias demo](10-generador-noticias-demo.md) | Dataset sintético de 32 noticias, determinismo e idempotencia |
 | [11 Automatización y reseed](11-automatizacion-y-reseed.md) | Bootstrap, verify, ownership, dry-run, confirmación y reseed seguro |
 | [12 Verificación final](12-verificacion-final.md) | Cierre, reproducibilidad y entrada para nuevos desarrolladores |
+| [13 Imágenes del dataset demo](13-imagenes-demo.md) | Procedencia, licencias, IA y validación HTTP de las imágenes |
 
 ## Cómo leer los criterios
 

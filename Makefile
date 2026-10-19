@@ -1,6 +1,7 @@
 .PHONY: env-local env-atlas db-check-config db-ping db-test db-init db-schema-check db-seed-catalog db-seed-catalogs db-seed-check db-seed-demo db-seed-news db-news-check db-bootstrap db-verify db-reseed-dry-run db-reseed news-db-up news-db-down news-api-up setup-keys
 .PHONY: chatbot-up chatbot-test news-contract news-contract-check news-integration-test
 .PHONY: chatbot-stub chatbot-api chatbot-openai chatbot-config-test
+.PHONY: db-news-images-check
 
 -include .env
 
@@ -126,6 +127,10 @@ db-news-check:
 	@echo "=== Checking demo news dataset ==="
 	$(call ensure_news_db)
 	@$(DOCKER_COMPOSE) --profile tools run --rm news-tools python -m news.news_check
+
+# Explicitly online; versioned fixtures only, no DB dependency or secret loading.
+db-news-images-check:
+	@$(DOCKER_COMPOSE) --profile tools run --rm --no-deps news-tools python -m news.news_images_check
 
 db-bootstrap:
 	@echo "=== Bootstrapping news DB (init + catalogs + demo news + checks) ==="

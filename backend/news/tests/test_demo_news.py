@@ -4,6 +4,9 @@ Todo el contenido generado es sintético (DEMO / SYNTHETIC DATA): no representa
 acontecimientos reales ni utiliza IA, red ni APIs externas.
 """
 
+from collections import Counter
+from urllib.parse import urlsplit
+
 from news.demo_news import (
     EXPECTED_NEWS_COUNT,
     get_demo_news_documents,
@@ -125,7 +128,6 @@ def test_generator_covers_required_image_types_with_coherent_disclosure() -> Non
     types = {doc["image"]["type"] for doc in documents}
     assert {
         "ai_generated",
-        "ai_modified",
         "illustration",
         "photograph",
         "none",
@@ -140,6 +142,31 @@ def test_generator_covers_required_image_types_with_coherent_disclosure() -> Non
         assert doc["aiAssistance"]["imageGenerated"] is (
             image["type"] == "ai_generated"
         )
+
+
+def test_demo_images_have_real_https_sources_and_honest_attribution() -> None:
+    documents = _documents()
+    assert Counter(doc["image"]["type"] for doc in documents) == {
+        "photograph": 9, "illustration": 10, "ai_generated": 4, "none": 9,
+    }
+    for doc in documents:
+        image = doc["image"]
+        if image["type"] == "none":
+            assert image["url"] is None
+            continue
+        url = urlsplit(image["url"])
+        assert url.scheme == "https"
+        assert url.hostname == "upload.wikimedia.org"
+        assert not url.query and not url.fragment and not url.username
+        assert "https://commons.wikimedia.org/wiki/File:" in image["credit"]
+        assert "https://" in image["rights"]
+        assert "ilustrativa" in image["alt"]
+        assert "no documenta" in image["alt"]
+        if image["type"] == "ai_generated":
+            assert "generada mediante IA" in image["aiDisclosure"]
+            assert "no es evidencia" in image["aiDisclosure"]
+        else:
+            assert image["aiDisclosure"] is None
 
 
 def test_generator_documents_validate_with_news_model() -> None:
