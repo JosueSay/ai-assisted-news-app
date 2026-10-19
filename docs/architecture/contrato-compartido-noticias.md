@@ -4,9 +4,9 @@ Estado: implementado. El esquema y los seeders aprobados en el PR #5 (`4228506`)
 versionados en `backend/news/` y `docs/design/database/`, son la base común de
 la API, el chatbot y el desarrollo local. El PR #4 (`c756e4f`) los consume.
 
-Este contrato no implica que esté completo el diagrama conversacional JEV + CODE + LLM.
-Las brechas y siguientes pasos se documentan en
-[arquitectura pendiente del chat](chatbot-jev-code-llm-pendientes.md).
+El modo news completa el routing conversacional JEV + CODE + LLM con contratos
+deterministas y catálogo de capacidades. El detalle de las rutas, límites y pruebas
+está en la [arquitectura conversacional](chatbot-jev-code-llm-pendientes.md).
 
 ```mermaid
 flowchart LR

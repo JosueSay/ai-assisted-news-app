@@ -61,7 +61,7 @@ async def test_affirmative_followup_reaches_llm_with_the_previous_offer_and_cita
     offer = "Si quieres, puedo listar las noticias publicadas o filtrarlas por país."
     provider = FakeProvider(offer)
     service = chat(database, replace(settings, provider="openai", api_key="fixture"), provider)
-    first = await service.reply(request("Noticias de México"))
+    first = await service.reply(request("Resume las noticias de México"))
     second = await service.reply(request("ok si hazlo", first.sessionId))
     assert second.sessionId == first.sessionId
     assert second.message.intent != ResponseIntent.unsupported
@@ -85,6 +85,11 @@ async def test_followup_uses_the_previous_selection_instead_of_newer_unrelated_n
     second = await service.reply(request(followup, first.sessionId))
     assert second.message.intent != ResponseIntent.unsupported
     assert {c.id for c in second.message.citedNews} == {c.id for c in first.message.citedNews}
+    if followup == "de que paises son":
+        assert second.message.strategy == ResponseStrategy.database_query
+        assert "México" in second.message.content
+        assert provider.calls == []
+        return
     assert {
         loc["countryCode"]
         for article in provider.calls[-1]["context"]["noticias"]
@@ -175,10 +180,10 @@ async def test_out_of_range_ordinal_does_not_choose_an_unrelated_article(databas
 async def test_exact_three_turn_sequence_keeps_the_last_offer_and_selection(database, settings):
     provider = FakeProvider("Estas son las noticias de México.")
     service = chat(database, replace(settings, provider="openai", api_key="fixture"), provider)
-    first = await service.reply(request("Noticias de México"))
+    first = await service.reply(request("Resume las noticias de México"))
     offer = "Si quieres, puedo listar solo las noticias publicadas o filtrar por país."
     provider.text = offer
-    second = await service.reply(request("de que paises son", first.sessionId))
+    second = await service.reply(request("resúmelas", first.sessionId))
     provider.text = "¿Prefieres listar las noticias o elegir un país?"
     third = await service.reply(request("ok si hazlo", second.sessionId))
     assert first.sessionId == second.sessionId == third.sessionId

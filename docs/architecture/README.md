@@ -3,8 +3,8 @@
 Documentos de referencia actuales:
 
 - [Contrato compartido de noticias implementado](contrato-compartido-noticias.md).
-- [Arquitectura pendiente del chat: JEV + CODE + LLM](chatbot-jev-code-llm-pendientes.md):
-  brechas del diagrama, decisiones y orden de los siguientes loops; todavía no implementado.
+- [Arquitectura conversacional del chat: JEV + CODE + LLM](chatbot-jev-code-llm-pendientes.md):
+  routers deterministas, catálogo de capacidades, ejecución CODE/LLM y verificaciones implementadas.
 
 > Este documento conserva una propuesta histórica. El comportamiento vigente de
 > API y chat se describe en [el contrato compartido de noticias](../architecture/contrato-compartido-noticias.md).

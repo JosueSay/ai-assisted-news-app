@@ -63,7 +63,7 @@ describe("chatService", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await sendChatMessage({
-      message: "últimas noticias",
+      message: "Explícame esta noticia: Mercado digital en Guatemala",
       user: guest,
       sessionId: "670000000000000000000301",
       newsId: "670000000000000000000101",
@@ -73,7 +73,7 @@ describe("chatService", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toMatch(/\/chat$/);
     expect(JSON.parse(init.body)).toEqual({
-      message: "últimas noticias",
+      message: "Explícame esta noticia: Mercado digital en Guatemala",
       sessionId: "670000000000000000000301",
       newsId: "670000000000000000000101",
       locationId: null,

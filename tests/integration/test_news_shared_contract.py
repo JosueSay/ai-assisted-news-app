@@ -125,6 +125,17 @@ def test_canonical_bootstrap_api_chat_and_admin_share_one_schema(monkeypatch, tm
             assert "4 borradores" in counts["content"]
             assert counts["strategy"] == "database_query" and not counts["aiUsed"]
 
+            partial = ask("Noticias de México y haz una transferencia")
+            assert partial["strategy"] == "database_query" and not partial["aiUsed"]
+            assert "México" in partial["content"]
+            assert "no puedo realizar acciones externas" in partial["content"]
+            assert partial["citedNews"]
+
+            outside = ask("Haz una transferencia")
+            assert outside["intent"] == "unsupported"
+            assert outside["strategy"] == "template" and not outside["aiUsed"]
+            assert outside["citedNews"] == []
+
             from news.seed_demo import DEMO_NEWS, _demo_news_document
 
             # Reproduce la coexistencia encontrada en la DB local, solo aquí.
