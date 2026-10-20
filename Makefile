@@ -2,6 +2,7 @@
 .PHONY: chatbot-up chatbot-test news-contract news-contract-check news-integration-test
 .PHONY: chatbot-stub chatbot-api chatbot-openai chatbot-config-test
 .PHONY: db-news-images-check
+.PHONY: gcp-bootstrap gcp-secrets gcp-deploy
 
 -include .env
 
@@ -212,3 +213,14 @@ setup-keys:
 
 news-integration-test:
 	@bash scripts/news-integration-test.sh
+
+# Deploy en Google Cloud (ver docs/deploy/README.md). Requiere gcloud con sesión iniciada.
+# Los secretos se suben desde keys/ sin imprimirse.
+gcp-bootstrap:
+	@bash deploy/gcp/bootstrap.sh
+
+gcp-secrets:
+	@bash deploy/gcp/load-secrets.sh
+
+gcp-deploy:
+	@bash deploy/gcp/deploy.sh
