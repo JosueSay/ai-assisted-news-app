@@ -18,3 +18,9 @@ coverage/
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+
+# Configuración local: nunca dentro de una imagen.
+**/.env
+**/.env.*
+!**/.env.example
+graphify-out/
