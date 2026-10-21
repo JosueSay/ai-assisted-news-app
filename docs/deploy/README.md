@@ -9,6 +9,10 @@ La [guía Firebase paso a paso](firebase-paso-a-paso.md) explica desde la creaci
 del proyecto hasta la comprobación del feed, la lectura, el chat y el pipeline.
 Para automatizar publicaciones después del primer deploy, sigue la
 [guía del pipeline paso a paso](pipeline-paso-a-paso.md).
+Para generar un instalador Android, sigue la
+[guía del APK paso a paso](android-apk-paso-a-paso.md).
+Para actualizar automáticamente la descarga junto con Hosting, sigue la
+[guía Android automática](android-automatico-paso-a-paso.md).
 
 ## Comandos
 
@@ -19,6 +23,8 @@ Para automatizar publicaciones después del primer deploy, sigue la
 | `ALLOW_PUBLIC=1 make gcp-deploy CHATBOT_PROVIDER=openai` | Primer deploy de los dos backends, con OpenAI, acceso HTTP público y Auth de aplicación |
 | `make firebase-check-config` | Validar proyecto Firebase y parámetros públicos del frontend |
 | `make firebase-deploy` | Exportar la web y publicar únicamente Hosting |
+| `make android-apk` | Solicitar un APK firmado en EAS, tras configurar cuenta y variables |
+| `make android-apk-ci` | En el runner: esperar el APK y exportar su URL para Hosting |
 | `make deploy-test` | Comprobar comandos cloud/Hosting, preflight CI e IAM simulados, sin red ni secretos |
 | `make news-integration-test` | Probar API, perfil, lecturas y chat sobre MongoDB efímera |
 
@@ -53,6 +59,6 @@ exclusivamente de `users.role`, vinculado al UID Firebase verificado. Perfil,
 interacciones y chat requieren Firebase ID tokens; feed y detalle públicos siguen
 disponibles. El límite de instancias no reemplaza los controles de presupuesto IA.
 
-El despliegue web no genera un build Android/iOS. Abre el portal publicado en el
-navegador del teléfono; Google Sign-In nativo requiere un build propio y configuración
-OAuth adicional. Consulta la [guía del frontend](../../frontend/README.md).
+`make firebase-deploy` por sí solo no genera un build móvil. El workflow de main
+sí compila Android antes de publicar Hosting y requiere EXPO_TOKEN. iOS sigue
+pendiente. Consulta la [guía del frontend](../../frontend/README.md).

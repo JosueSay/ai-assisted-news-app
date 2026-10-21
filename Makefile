@@ -3,11 +3,11 @@
 .PHONY: chatbot-stub chatbot-api chatbot-openai chatbot-config-test
 .PHONY: db-news-images-check
 .PHONY: gcp-bootstrap gcp-secrets gcp-deploy
-.PHONY: deploy-test firebase-check-config firebase-deploy
+.PHONY: deploy-test firebase-check-config firebase-deploy android-apk android-apk-ci
 
 # El .env local de Compose puede contener localhost y otro proyecto Firebase.
 # Los comandos cloud usan el entorno/config.sh y el frontend usa sus propios .env.
-CLOUD_TARGETS := gcp-bootstrap gcp-secrets gcp-deploy firebase-check-config firebase-deploy deploy-test
+CLOUD_TARGETS := gcp-bootstrap gcp-secrets gcp-deploy firebase-check-config firebase-deploy deploy-test android-apk android-apk-ci
 ifneq ($(filter $(CLOUD_TARGETS),$(MAKECMDGOALS)),)
 ifneq ($(filter-out $(CLOUD_TARGETS),$(MAKECMDGOALS)),)
 $(error Ejecuta las tareas locales y cloud en comandos make separados)
@@ -206,7 +206,7 @@ news-contract-check:
 setup-keys:
 	@echo "=== Setting up secret files ==="
 	@mkdir -p keys
-	@for f in mongodb_uri openai_api_key; do \
+	@for f in mongodb_uri openai_api_key expo_token; do \
 		if [ -e "keys/$$f" ] || [ -L "keys/$$f" ]; then \
 			echo "keys/$$f       EXISTS"; \
 		else \
@@ -216,6 +216,7 @@ setup-keys:
 	done
 	@echo ""
 	@echo "Complete missing secret values manually."
+	@echo "expo_token is optional locally; only needed if you keep a local copy of the Expo CI token."
 	@echo "Then run:"
 	@echo "make db-check-config"
 	@echo "make db-ping"
@@ -242,3 +243,10 @@ firebase-check-config:
 
 firebase-deploy:
 	@bash deploy/firebase/hosting.sh
+
+# Requiere cuenta/proyecto EAS y variables públicas production ya configurados.
+android-apk:
+	@cd frontend && npx eas-cli@latest build --platform android --profile apk
+
+android-apk-ci:
+	@bash deploy/expo/build-ci.sh

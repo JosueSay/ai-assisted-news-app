@@ -10,6 +10,9 @@ import type { NewsArticle } from "../src/types";
 type LayoutEvent = { nativeEvent: { layout: { y: number; height: number } } };
 const native = vi.hoisted(() => ({
   layouts: new Set<(event: LayoutEvent) => void>(),
+  width: 1200,
+  os: "web",
+  keyboard: new Map<string, () => void>(),
 }));
 
 // Keep React's real effects and state; replace native rendering and external I/O.
@@ -44,9 +47,13 @@ vi.mock("react-native", async () => {
     TextInput: () => null,
     ActivityIndicator: () => null,
     AppState: { currentState: "active", addEventListener: () => ({ remove() {} }) },
-    Platform: { OS: "web" },
+    Keyboard: { addListener: (event: string, callback: () => void) => {
+      native.keyboard.set(event, callback);
+      return { remove: () => native.keyboard.delete(event) };
+    } },
+    Platform: { get OS() { return native.os; } },
     StyleSheet: { create: (styles: unknown) => styles },
-    useWindowDimensions: () => ({ width: 1200, height: 800 }),
+    useWindowDimensions: () => ({ width: native.width, height: 800 }),
   };
 });
 vi.mock("react-native-safe-area-context", async () => ({
@@ -60,7 +67,10 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
   default: { getItem: async () => null, setItem: async () => undefined },
 }));
 vi.mock("../src/components/ArticleImage", () => ({ ArticleImage: () => null }));
-vi.mock("../src/features/chat/ChatScreen", () => ({ ChatScreen: () => null }));
+vi.mock("../src/features/chat/ChatScreen", () => ({
+  ChatScreen: ({ isKeyboardVisible }: { isKeyboardVisible?: boolean }) =>
+    React.createElement("section", { "data-testid": "chat", "data-keyboard": String(Boolean(isKeyboardVisible)) }),
+}));
 vi.mock("../src/services/firebaseClient", () => ({
   getCurrentFirebaseIdToken: async () => "verified-test-token",
 }));
@@ -90,6 +100,9 @@ let exitDuration: number | undefined;
 let exitStatus: number;
 
 beforeEach(() => {
+  native.width = 1200;
+  native.os = "web";
+  native.keyboard.clear();
   vi.useFakeTimers();
   vi.stubGlobal("React", React);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -244,6 +257,42 @@ describe("feed after reading", () => {
     await render();
 
     expect(feedRequests).toBe(1);
+    expect(container.textContent).toContain("Contenido.");
+  });
+});
+
+describe("mobile assistant navigation", () => {
+  it("opens the assistant first in the Android app and hides navigation while typing", async () => {
+    native.os = "android";
+    native.width = 390;
+    await render();
+    expect(container.querySelector('[data-testid="chat"]')).not.toBeNull();
+    expect([...container.querySelectorAll("button")].some(button => button.textContent === "Guardados")).toBe(true);
+    await act(async () => { native.keyboard.get("keyboardDidShow")?.(); });
+    expect(container.querySelector('[data-testid="chat"]')?.getAttribute("data-keyboard")).toBe("true");
+    expect([...container.querySelectorAll("button")].some(button => button.textContent === "Guardados")).toBe(false);
+    await act(async () => { native.keyboard.get("keyboardDidHide")?.(); });
+    expect([...container.querySelectorAll("button")].some(button => button.textContent === "Guardados")).toBe(true);
+    await press("Inicio");
+    expect(leadTitle()).toBe("Abrir noticia: Primera noticia");
+    await press("Asistente");
+    expect(container.querySelector('[data-testid="chat"]')).not.toBeNull();
+  });
+  it("opens the assistant on mobile web without an explicit route", async () => {
+    native.width = 390;
+    window.history.replaceState(null, "", "/");
+    await render();
+    expect(container.querySelector('[data-testid="chat"]')).not.toBeNull();
+  });
+  it("keeps the desktop home page and explicit mobile links", async () => {
+    window.history.replaceState(null, "", "/");
+    await render();
+    expect(leadTitle()).toBe("Abrir noticia: Primera noticia");
+    native.width = 390;
+    await act(async () => {
+      window.history.replaceState(null, "", "#/noticia/first");
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
     expect(container.textContent).toContain("Contenido.");
   });
 });

@@ -12,13 +12,23 @@
       "bundleIdentifier": "com.aina.news"
     },
     "android": {
-      "package": "com.aina.news"
+      "package": "com.aina.news",
+      "versionCode": 3,
+      "softwareKeyboardLayoutMode": "resize",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "bundler": "metro"
     },
     "plugins": [
-      "expo-web-browser"
-    ]
+      "expo-web-browser",
+      "react-native-nitro-google-signin"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "4609400e-a2d4-40e7-86ea-1baeb7b0a301"
+      }
+    },
+    "owner": "donmathiuz"
   }
 }

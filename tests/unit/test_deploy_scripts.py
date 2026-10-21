@@ -12,6 +12,65 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_setup_keys_creates_optional_expo_file_and_preserves_existing_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            (temporary / "keys").mkdir()
+            existing = temporary / "keys/expo_token"
+            existing.touch()
+            with existing.open("r+b") as fixture:
+                fixture.truncate(64)  # Synthetic bytes; never read a real credential.
+            original = existing.stat()
+            for _ in range(2):
+                completed = subprocess.run(
+                    ["make", "-f", str(ROOT / "Makefile"), "setup-keys"],
+                    cwd=temporary, capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertEqual(existing.stat().st_size, original.st_size)
+                self.assertEqual(existing.stat().st_mtime_ns, original.st_mtime_ns)
+                for name in ("mongodb_uri", "openai_api_key"):
+                    self.assertEqual((temporary / "keys" / name).stat().st_size, 0)
+
+    def test_expo_build_waits_and_exports_only_a_successful_apk(self):
+        project = json.loads((ROOT / "frontend/app.json").read_text())["expo"]["extra"]["eas"]["projectId"]
+        for outcome in ("success", "failed", "invalid", "no-token"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as directory:
+                temporary = Path(directory)
+                env_file = temporary / "runner-env"
+                calls = temporary / "calls.json"
+                result = [{"status": "FINISHED", "platform": "ANDROID", "buildProfile": "apk",
+                           "distribution": "INTERNAL", "app": {"id": project},
+                           "artifacts": {"buildUrl": "https://expo.dev/artifacts/eas/test-ci.apk"}}]
+                if outcome == "invalid":
+                    result[0]["status"] = "ERRORED"
+                fake = temporary / "npx"
+                fake.write_text(
+                    "#!/usr/bin/env python3\nimport json, pathlib, sys\n"
+                    f"pathlib.Path({str(calls)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+                    f"print({json.dumps(result)!r})\n"
+                    f"sys.exit({1 if outcome == 'failed' else 0})\n"
+                )
+                fake.chmod(0o755)
+                completed = subprocess.run(
+                    ["bash", "deploy/expo/build-ci.sh"], cwd=ROOT,
+                    env={**os.environ, "PATH": f"{temporary}:{os.environ['PATH']}",
+                         "EXPO_TOKEN": "test-token-only" if outcome != "no-token" else "",
+                         "GITHUB_ENV": str(env_file)},
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(completed.returncode == 0, outcome == "success", completed.stderr)
+                self.assertNotIn("test-token-only", completed.stdout + completed.stderr)
+                if outcome == "success":
+                    self.assertIn("EXPO_PUBLIC_ANDROID_DOWNLOAD_URL=https://expo.dev/artifacts/eas/test-ci.apk", env_file.read_text())
+                    arguments = json.loads(calls.read_text())
+                    for flag in ("--wait", "--json", "--non-interactive", "--freeze-credentials"):
+                        self.assertIn(flag, arguments)
+                else:
+                    self.assertFalse(env_file.exists())
+                if outcome == "no-token":
+                    self.assertFalse(calls.exists())
+
     def test_ci_preflight_requires_firebase_region_and_consistent_model_prices(self):
         valid = {
             "WIF_PROVIDER": "projects/123/locations/global/workloadIdentityPools/github/providers/test",

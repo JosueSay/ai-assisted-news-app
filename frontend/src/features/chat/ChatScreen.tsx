@@ -45,6 +45,7 @@ type Props = {
   onClearContext: () => void;
   onOpenArticle: (slug: string) => void;
   onProfileChanged: (profile: NewsProfile) => void;
+  isKeyboardVisible?: boolean;
 };
 
 type ActiveConversation = Omit<ChatConversation, "sessionId" | "expiresAt"> & {
@@ -95,10 +96,12 @@ export function ChatScreen({
   onClearContext,
   onOpenArticle,
   onProfileChanged,
+  isKeyboardVisible = false,
 }: Props) {
   const userKey = user.id;
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const isMobile = width < 768;
+  const hideDetails = (isMobile && isKeyboardVisible) || height < 450;
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<ActiveConversation | null>(null);
   const [isHistoryLoaded, setIsHistoryLoaded] = useState(false);
@@ -115,6 +118,10 @@ export function ChatScreen({
   const lastContextArticleId = useRef<string | null>(null);
   const sending = useRef(false);
   const entries = activeConversation?.entries ?? [];
+
+  useEffect(() => {
+    if (isKeyboardVisible) setIsHistoryOpen(false);
+  }, [isKeyboardVisible]);
 
   useEffect(() => {
     let active = true;
@@ -369,7 +376,7 @@ export function ChatScreen({
           <View style={styles.headerTitleRow}>
             <Bot size={24} color={colors.brand} />
             <View style={styles.headerCopy}>
-              <Text style={styles.title}>Asistente de noticias</Text>
+              <Text style={[styles.title, isMobile ? styles.mobileTitle : null]}>Asistente de noticias</Text>
               {!isMobile ? (
                 <Text style={styles.subtitle}>Respuestas basadas en noticias publicadas.</Text>
               ) : null}
@@ -389,7 +396,7 @@ export function ChatScreen({
           ) : null}
         </View>
 
-        <View style={styles.locationBlock}>
+        {!hideDetails ? <View style={styles.locationBlock}>
           <View style={styles.locationLabelRow}>
             <MapPin size={16} color={colors.textSecondary} />
             <Text style={styles.locationLabel}>Ubicación simulada</Text>
@@ -418,9 +425,9 @@ export function ChatScreen({
               );
             })}
           </ScrollView>
-        </View>
+        </View> : null}
 
-        {activeConversation?.contextTitle ? (
+        {activeConversation?.contextTitle && !hideDetails ? (
           <View style={styles.contextBanner}>
             <View style={styles.contextText}>
               <Text style={styles.contextKicker}>Conversación sobre</Text>
@@ -493,7 +500,7 @@ export function ChatScreen({
             accessibilityLabel="Mensaje para el asistente"
             value={draft}
             onChangeText={setDraft}
-            placeholder="Escribe tu mensaje… (Enter para enviar)"
+            placeholder={isMobile ? "Escribe tu mensaje…" : "Escribe tu mensaje… (Enter para enviar)"}
             placeholderTextColor={colors.textSecondary}
             editable={isHistoryLoaded && !isSending}
             maxLength={2000}
@@ -589,9 +596,14 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   mobileHistoryPanel: {
+    position: "absolute",
+    top: 70,
+    left: 0,
+    right: 0,
+    zIndex: 3,
     width: "100%",
     height: 220,
-    maxHeight: 220,
+    maxHeight: "60%",
     flexShrink: 0,
   },
   historyHeader: {
@@ -709,6 +721,8 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   headerTitleRow: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs,
@@ -723,6 +737,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     color: colors.textSecondary,
+  },
+  mobileTitle: {
+    fontSize: 22,
   },
   locationBlock: {
     gap: spacing.xxs,
@@ -743,6 +760,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xxs,
   },
   chip: {
+    minHeight: 44,
+    justifyContent: "center",
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radii.pill,

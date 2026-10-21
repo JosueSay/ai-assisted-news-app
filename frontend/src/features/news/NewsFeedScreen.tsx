@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AppState,
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -120,9 +121,10 @@ function serializeRoute(route: NewsRoute) {
   }
 }
 
-function parseRouteFromHash(hash: string): NewsRoute {
+function parseRouteFromHash(hash: string, mobileDefault = false): NewsRoute {
   const cleanHash = hash.replace(/^#\/?/, "");
-  if (!cleanHash || cleanHash === "inicio") return { name: "home" };
+  if (!cleanHash) return { name: mobileDefault ? "chat" : "home" };
+  if (cleanHash === "inicio") return { name: "home" };
   if (cleanHash === "secciones") return { name: "home" };
   if (cleanHash === "guardados") return { name: "saved" };
   if (cleanHash === "admin" || cleanHash === "admin/nueva") return { name: "adminCreate" };
@@ -141,11 +143,11 @@ function parseRouteFromHash(hash: string): NewsRoute {
   return { name: "home" };
 }
 
-function getInitialRoute(): NewsRoute {
+function getInitialRoute(isMobile: boolean): NewsRoute {
   if (Platform.OS === "web" && typeof window !== "undefined") {
-    return parseRouteFromHash(window.location.hash);
+    return parseRouteFromHash(window.location.hash, isMobile);
   }
-  return { name: "home" };
+  return { name: "chat" };
 }
 
 function formatLongDate(value: string) {
@@ -180,7 +182,8 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [feedError, setFeedError] = useState<string | null>(null);
   const hasLoadedFeedRef = useRef(false);
-  const [route, setRoute] = useState<NewsRoute>(getInitialRoute);
+  const [route, setRoute] = useState<NewsRoute>(() => getInitialRoute(isMobile));
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [storageError, setStorageError] = useState<string | null>(null);
@@ -315,9 +318,22 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
 
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined") return;
-    const onHashChange = () => setRoute(parseRouteFromHash(window.location.hash));
+    const onHashChange = () => setRoute(parseRouteFromHash(window.location.hash, isMobile));
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const show = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      () => setIsKeyboardVisible(true),
+    );
+    const hide = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => setIsKeyboardVisible(false),
+    );
+    return () => { show.remove(); hide.remove(); };
   }, []);
 
   const detailSlug = route.name === "article" || route.name === "chat" ? route.slug : undefined;
@@ -1452,6 +1468,7 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
     if (route.name === "chat") {
       return (
         <ChatScreen
+          isKeyboardVisible={isKeyboardVisible}
           user={user}
           contextArticle={route.slug ? getArticleBySlug(route.slug, articles) : null}
           onClearContext={() => navigate({ name: "chat" }, true)}
@@ -1479,7 +1496,7 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
       <View style={styles.header}>
         <Pressable
           accessibilityRole="button"
-          onPress={() => navigate({ name: "home" })}
+          onPress={() => navigate({ name: isMobile ? "chat" : "home" })}
           style={({ pressed }) => [styles.brand, pressed ? styles.pressed : null]}
         >
           <Text style={styles.brandName}>AI News</Text>
@@ -1568,7 +1585,7 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
         )}
       </KeyboardAvoidingView>
 
-      {isMobile ? (
+      {isMobile && !isKeyboardVisible ? (
         <View style={styles.bottomNav}>
           <BottomNavItem
             label="Inicio"
@@ -1717,12 +1734,13 @@ const styles = StyleSheet.create({
   },
   contentFrame: {
     flex: 1,
+    minHeight: 0,
   },
   scrollContent: {
     paddingVertical: spacing.lg,
   },
   scrollContentMobile: {
-    paddingBottom: layout.mobileBottomNavHeight + spacing.xl,
+    paddingBottom: spacing.xl,
   },
   container: {
     width: "100%",
@@ -2176,10 +2194,7 @@ const styles = StyleSheet.create({
     opacity: 0.76,
   },
   bottomNav: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flexShrink: 0,
     minHeight: layout.mobileBottomNavHeight,
     paddingHorizontal: spacing.xs,
     paddingTop: spacing.xs,
