@@ -1,7 +1,8 @@
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 import { LogIn, UserRound } from "lucide-react-native";
 
 import { AppButton } from "../../components/AppButton";
+import { AndroidDownload } from "../../components/AndroidDownload";
 import { colors, fonts, shadows, spacing } from "../../theme";
 
 type Props = {
@@ -24,7 +25,7 @@ export function LoginScreen({
   onSignInAsGuest,
 }: Props) {
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       <View style={styles.panel}>
         <View style={styles.brandBlock}>
           <Text style={styles.eyebrow}>AI Assisted News</Text>
@@ -68,14 +69,19 @@ export function LoginScreen({
         ) : null}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
+        <AndroidDownload />
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  scroll: {
     flex: 1,
+    backgroundColor: colors.background,
+  },
+  container: {
+    flexGrow: 1,
     backgroundColor: colors.background,
     alignItems: "center",
     justifyContent: "center",

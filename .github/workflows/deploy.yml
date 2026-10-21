@@ -61,6 +61,7 @@ jobs:
     needs: [test, frontend]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     environment: production
     permissions:
       contents: read
@@ -98,6 +99,10 @@ jobs:
         run: |
           npm ci --prefix frontend
           npm install --global firebase-tools@15.34.0
+      - name: Generar APK Android y preparar enlace de descarga
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: make android-apk-ci
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}

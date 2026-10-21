@@ -8,7 +8,8 @@ ejecutar el proyecto en entorno local.
 - **Nunca versionar** estos archivos. `.gitignore` ignora todo el directorio excepto este README.
 - Cada archivo contiene **únicamente el valor del secreto**, sin metadatos, comentarios ni
   líneas adicionales.
-- El proyecto no lee secretos de variables de entorno directamente: los lee desde estos archivos.
+- Las APIs leen secretos desde archivos. Para el SDK EAS del pipeline, GitHub
+  inyecta temporalmente `EXPO_TOKEN` desde un Environment secret, sin usar `.env`.
 
 ## Archivos requeridos
 
@@ -16,6 +17,7 @@ ejecutar el proyecto en entorno local.
 | --- | --- | --- |
 | `mongodb_uri` | URI de conexión a MongoDB Atlas para la aplicación de noticias. | Sí |
 | `openai_api_key` | API key de OpenAI del chatbot de noticias (`backend/assistant` en modo news). Solo se usa con `CHATBOT_PROVIDER=openai`. | Sí (puede quedar vacío con `CHATBOT_PROVIDER=stub`) |
+| `expo_token` | Copia local opcional del token Expo para CI. El agente no lo lee; el operador lo carga en GitHub Secrets. | `make setup-keys` crea el archivo vacío; puede permanecer vacío si no guardas una copia local. |
 
 ## Preparación automática
 
@@ -25,8 +27,10 @@ make setup-keys
 
 Crea los archivos faltantes vacíos. No sobrescribe archivos existentes.
 
-Para Cloud Run se usa la misma lista: el operador ejecuta `make gcp-secrets`
-para cargar estos archivos en Secret Manager. Con `CHATBOT_PROVIDER=stub` OpenAI
+Para Cloud Run se usan solo `mongodb_uri` y `openai_api_key`: el operador ejecuta
+`make gcp-secrets` para cargarlos en Secret Manager. `expo_token` no se sube a
+Google Cloud y no es necesario para ejecutar DB, APIs o builds con sesión Expo local.
+Con `CHATBOT_PROVIDER=stub` OpenAI
 es opcional. El despliegue actual con Firebase Auth no requiere contraseña admin
 local ni otro archivo secreto. Consulta la
 [guía de despliegue](../docs/deploy/firebase-paso-a-paso.md).
@@ -61,6 +65,15 @@ van en `frontend/.env`. No guardes contraseñas, tokens ni claves privadas en es
 
 Reemplaza a pasar la key por la variable `API_GPT`: no debe ir en `.env`. El assistant solo usa
 `API_GPT` si está definida explícitamente en el entorno (compatibilidad con su uso anterior).
+
+## Expo en GitHub Actions
+
+Crea un token desde la cuenta Expo y guárdalo como **Environment secret**
+`EXPO_TOKEN` del entorno GitHub `production`. Si conservas una copia local,
+hazlo únicamente en `keys/expo_token`, nunca en `.env` ni código. El agente no
+lee ni copia su contenido. El job no requiere una copia local: GitHub inyecta
+el secreto en el paso que ejecuta EAS y no se incorpora al cliente web/APK.
+Consulta la [guía Android automática](../docs/deploy/android-automatico-paso-a-paso.md).
 
 ## Cómo crear `mongodb_uri`
 

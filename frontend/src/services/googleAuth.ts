@@ -14,6 +14,11 @@ import {
 import type { AppUser } from "../types";
 import { firebaseAuth, isFirebaseConfigured } from "./firebaseClient";
 import { fetchAuthenticatedProfile } from "./newsService";
+import {
+  clearAndroidGoogleSession,
+  isAndroidGoogleConfigured,
+  signInWithAndroidGoogle,
+} from "./androidGoogleSignIn";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -26,7 +31,6 @@ const discovery = {
 function readClientId(): string | null {
   const id = Platform.select({
     ios: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-    android: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
     default: null,
   });
   return id && id.trim().length > 0 ? id.trim() : null;
@@ -99,12 +103,13 @@ export function useGoogleAuth() {
   }, []);
 
   useEffect(() => {
+    if (Platform.OS !== "ios") return;
     if (response?.type === "error") {
       setError(response.error?.message ?? "Google Sign-In falló.");
       setIsLoading(false);
       return;
     }
-    if (response?.type !== "success" || !request || Platform.OS === "web") return;
+    if (response?.type !== "success" || !request) return;
     const auth = firebaseAuth;
     if (!auth || !clientId) {
       setError("Completa la configuración de Firebase y Google para esta app.");
@@ -140,6 +145,17 @@ export function useGoogleAuth() {
     setError(null);
     if (!isFirebaseConfigured || !firebaseAuth) {
       setError("Completa la configuración pública de Firebase en frontend/.env.");
+      return;
+    }
+    if (Platform.OS === "android") {
+      setIsLoading(true);
+      try {
+        const signedIn = await signInWithAndroidGoogle(firebaseAuth);
+        if (!signedIn) setIsLoading(false);
+      } catch (authError) {
+        setError(authError instanceof Error ? authError.message : "Google Sign-In falló.");
+        setIsLoading(false);
+      }
       return;
     }
     if (Platform.OS === "web") {
@@ -180,6 +196,13 @@ export function useGoogleAuth() {
     if (firebaseAuth) await firebaseSignOut(firebaseAuth);
     setUser(null);
     setError(null);
+    try {
+      await clearAndroidGoogleSession();
+    } catch {
+      // Firebase is already signed out. Never retain application access because
+      // Play Services could not clear its own account selection state.
+      setError("Tu sesión se cerró, pero Google no pudo limpiar su sesión del dispositivo.");
+    }
   }, []);
 
   return {
@@ -188,8 +211,9 @@ export function useGoogleAuth() {
     error,
     isFirebaseConfigured,
     isGoogleConfigured:
-      isFirebaseConfigured && (Platform.OS === "web" || clientId !== null),
-    canPromptGoogle: Platform.OS === "web" ? isFirebaseConfigured : Boolean(request),
+      isFirebaseConfigured && (Platform.OS === "web" || isAndroidGoogleConfigured || clientId !== null),
+    canPromptGoogle: Platform.OS === "web" || isAndroidGoogleConfigured
+      ? isFirebaseConfigured : Boolean(request),
     signInWithGoogle,
     signInAsGuest,
     signOut,

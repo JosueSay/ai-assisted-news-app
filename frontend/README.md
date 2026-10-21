@@ -82,6 +82,12 @@ local de respaldo en el frontend.
 
 ## Qué vas a ver
 
+Después de iniciar sesión, la app móvil abre el asistente. En la web de escritorio
+abre el feed; en la web móvil, sin una ruta explícita, abre el asistente. Los
+enlaces directos a noticias y las pestañas Inicio/Guardados siguen disponibles.
+La navegación inferior reserva su espacio y se oculta al abrir el teclado nativo;
+el historial móvil se despliega sin desplazar el campo de escritura.
+
 Al abrir la app aparece la pantalla de autenticación:
 
 - **"Continuar como invitado"** — crea una sesión Firebase Anonymous; requiere
@@ -107,10 +113,16 @@ Al abrir la app aparece la pantalla de autenticación:
    EXPO_PUBLIC_FIREBASE_APP_ID=...
    ```
 
-5. Configura los OAuth Client IDs Android e iOS en el mismo archivo:
+5. Android usa `react-native-nitro-google-signin` con Credential Manager. Guarda
+   el `google-services.json` actualizado de Firebase en `frontend/`, con el cliente
+   Android de la firma del APK y un cliente OAuth Web de tipo 3. El plugin en
+   `app.json` incorpora el archivo y `webClientId: "autoDetect"` obtiene ese cliente
+   Web. No necesita `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`. El ID token de Google
+   se intercambia por una sesión Firebase; los backends siguen recibiendo tokens Firebase.
+
+   Para el flujo iOS existente (todavía pendiente de prueba), configura:
 
    ```dotenv
-   EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=...
    EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=...
    ```
 
@@ -132,14 +144,11 @@ Al abrir la app aparece la pantalla de autenticación:
    Hazlo desde una sesión administrativa segura de MongoDB; nunca aceptes el rol
    desde el request del frontend.
 
-8. Para Google nativo, genera un **dev client propio** con EAS (no funciona en
-   Expo Go):
-
-   ```bash
-   npx eas-cli@latest build --profile development --platform android
-   ```
-   Instala el build en el dispositivo. Para iOS físico se necesita una build
-   firmada con el bundle ID configurado.
+8. Para un APK Android instalable, sigue la
+   [guía de Android paso a paso](../docs/deploy/android-apk-paso-a-paso.md).
+   Incluye cuenta Expo, variables del build y firma. Google nativo necesita
+   configuración OAuth y validación en dispositivo; habilitar Google para la
+   web no completa esa configuración. El perfil `apk` no usa Expo Go ni Metro.
 
 La sesión Firebase restaura el acceso; el backend crea/recupera el usuario por UID.
 Los usuarios provisionales `google:...`, `guest:...` y `local-admin:...` no se

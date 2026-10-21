@@ -1,8 +1,10 @@
 # Activar despliegue automático de backend y frontend
 
 Esta guía completa el despliegue manual ya realizado. El workflow publica los dos
-servicios Cloud Run y luego Firebase Hosting cuando llegan cambios a `main` y
+APK Android en EAS, los dos servicios Cloud Run y luego Firebase Hosting cuando llegan cambios a `main` y
 pasan las pruebas. No actualiza secretos ni esquemas MongoDB automáticamente.
+Antes de publicar, completa la [configuración Expo para el pipeline](android-automatico-paso-a-paso.md):
+necesita el secreto GitHub `EXPO_TOKEN`, proyecto EAS vinculado y firma ya creada.
 
 ## 1. Actualizar los permisos de la cuenta del pipeline
 
@@ -109,7 +111,8 @@ En **GitHub → Actions → deploy**, abre la ejecución del push a `main`.
 
 1. `test` debe aprobar backend, contrato de scripts e integración MongoDB efímera.
 2. `frontend` debe aprobar TypeScript, tests y export web de comprobación.
-3. `deploy` debe aprobar la configuración de `production` y autenticar por WIF.
+3. `deploy` debe aprobar la configuración de `production`, terminar el APK y
+   obtener su URL; después autentica por WIF.
 4. **Publicar API y chatbot en Cloud Run** debe terminar correctamente.
 5. **Publicar frontend en Firebase Hosting** debe terminar con `Deploy complete!`.
 6. Abre `https://adfasdfasfd-1899a.web.app` y prueba login, feed y chat.
@@ -121,10 +124,10 @@ por sí solos la configuración IAM o las variables externas.
 ## 6. Uso habitual después de activarlo
 
 ```text
-cambio → commit → push → PR → pruebas → merge a main → backend → Hosting
+cambio → commit → push → PR → pruebas → merge a main → APK → backend → Hosting con APK nuevo
 ```
 
-Si falla una prueba, no se publica. Si falla el deploy backend, no se publica
+Si falla una prueba o el APK, no se publica. Si falla el deploy backend, no se publica
 Hosting. Los dos servicios y Hosting son despliegues secuenciales: un fallo
 intermedio puede dejar alguno actualizado; no existe rollback conjunto automático.
 

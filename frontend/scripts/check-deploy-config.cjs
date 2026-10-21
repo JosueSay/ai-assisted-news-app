@@ -17,7 +17,9 @@ function checkDeployConfig(environment, expectedProjectId) {
   if (environment.EXPO_PUBLIC_FIREBASE_PROJECT_ID?.trim() !== expectedProjectId) {
     errors.push("EXPO_PUBLIC_FIREBASE_PROJECT_ID debe coincidir con NEWS_FIREBASE_PROJECT_ID.");
   }
-  for (const name of ["EXPO_PUBLIC_NEWS_API_BASE_URL", "EXPO_PUBLIC_ASSISTANT_API_BASE_URL"]) {
+  const urls = ["EXPO_PUBLIC_NEWS_API_BASE_URL", "EXPO_PUBLIC_ASSISTANT_API_BASE_URL"];
+  if (environment.EXPO_PUBLIC_ANDROID_DOWNLOAD_URL) urls.push("EXPO_PUBLIC_ANDROID_DOWNLOAD_URL");
+  for (const name of urls) {
     try {
       const url = new URL(environment[name]);
       if (url.protocol !== "https:" || ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
