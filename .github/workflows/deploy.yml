@@ -32,9 +32,33 @@ jobs:
       - name: Pytest backend
         working-directory: backend
         run: python -m pytest -q assistant/tests news/tests
+      - name: Contrato de scripts de deploy (sin cloud ni secretos)
+        run: make deploy-test
+      - name: Integración feed, perfil y chat (MongoDB efímera)
+        run: make news-integration-test
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Validar cliente y export web (sin publicar)
+        working-directory: frontend
+        env:
+          EXPO_NO_DOTENV: "1"
+          EXPO_NO_TELEMETRY: "1"
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run export:web
 
   deploy:
-    needs: test
+    needs: [test, frontend]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production
@@ -42,15 +66,23 @@ jobs:
       contents: read
       id-token: write
     env:
-      # No son secretos. Los imprime deploy/gcp/bootstrap.sh.
-      WIF_PROVIDER: CAMBIAR
-      DEPLOYER_SA: CAMBIAR
+      # Variables del entorno production en GitHub; ninguna contiene secretos.
+      WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+      DEPLOYER_SA: ${{ vars.DEPLOYER_SA }}
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      NEWS_FIREBASE_PROJECT_ID: ${{ vars.NEWS_FIREBASE_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+      CHATBOT_PROVIDER: ${{ vars.CHATBOT_PROVIDER || 'stub' }}
+      NEWS_CHAT_INPUT_USD_PER_MILLION: ${{ vars.NEWS_CHAT_INPUT_USD_PER_MILLION }}
+      NEWS_CHAT_OUTPUT_USD_PER_MILLION: ${{ vars.NEWS_CHAT_OUTPUT_USD_PER_MILLION }}
+      NEWS_API_ALLOWED_ORIGINS: ${{ vars.NEWS_API_ALLOWED_ORIGINS }}
+      CHATBOT_ALLOWED_ORIGINS: ${{ vars.CHATBOT_ALLOWED_ORIGINS }}
     steps:
       - id: cfg
         name: Revisar configuración
         run: |
-          if [[ "$WIF_PROVIDER" == CAMBIAR* || "$DEPLOYER_SA" == CAMBIAR* ]]; then
-            echo "::warning::Deploy omitido: falta configurar WIF_PROVIDER y DEPLOYER_SA."
+          if [[ -z "$WIF_PROVIDER" || -z "$DEPLOYER_SA" || -z "$PROJECT_ID" || "$WIF_PROVIDER" == CAMBIAR* || "$DEPLOYER_SA" == CAMBIAR* ]]; then
+            echo "::warning::Deploy omitido: configura WIF_PROVIDER, DEPLOYER_SA y GCP_PROJECT_ID."
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"

@@ -30,6 +30,8 @@ def test_canonical_bootstrap_api_chat_and_admin_share_one_schema(monkeypatch, tm
         "OPENAI_API_KEY_FILE": str(tmp_path / "missing_openai"),
         "API_GPT": "",
         "NEWS_FIREBASE_PROJECT_ID": "firebase-contract-test",
+        "NEWS_API_ALLOWED_ORIGINS": "https://firebase-contract-test.web.app",
+        "CHATBOT_ALLOWED_ORIGINS": "https://firebase-contract-test.web.app",
     }.items():
         monkeypatch.setenv(key, value)
 
@@ -88,6 +90,26 @@ def test_canonical_bootstrap_api_chat_and_admin_share_one_schema(monkeypatch, tm
         with TestClient(create_app()) as api, TestClient(create_chat_app()) as chat:
             assert api.get("/health").json()["mongodbConnected"]
             assert chat.get("/health").json()["mongodb_connected"]
+            # Browser preflights must permit Auth, profile PATCH and reading POSTs.
+            portal = "https://firebase-contract-test.web.app"
+            for client, route, method in (
+                (api, "/news", "GET"),
+                (api, "/profile", "PATCH"),
+                (api, "/news/fixture/interactions/read", "POST"),
+                (chat, "/chat", "POST"),
+            ):
+                preflight = client.options(route, headers={
+                    "Origin": portal,
+                    "Access-Control-Request-Method": method,
+                    "Access-Control-Request-Headers": "authorization,content-type",
+                })
+                assert preflight.status_code == 200, preflight.text
+                assert preflight.headers["access-control-allow-origin"] == portal
+                blocked = client.options(route, headers={
+                    "Origin": "https://untrusted.example.test",
+                    "Access-Control-Request-Method": method,
+                })
+                assert "access-control-allow-origin" not in blocked.headers
             assert api.get("/auth/me", headers=reader_headers).status_code == 200
             articles = api.get("/news").json()
             assert len(articles) == 28
@@ -103,6 +125,39 @@ def test_canonical_bootstrap_api_chat_and_admin_share_one_schema(monkeypatch, tm
                 assert (
                     article["image"]["aiDisclosure"] == stored["image"]["aiDisclosure"]
                 )
+
+            target = database.news.find_one({
+                "status": "published", "geographicScope.level": "country",
+            })
+            location_id = str(target["geographicScope"]["locationIds"][0])
+            preferences = api.patch("/profile", headers=reader_headers, json={
+                "locationId": location_id, "selectedTopics": target["topics"],
+            })
+            assert preferences.status_code == 200, preferences.text
+            assert preferences.json()["onboardingCompleted"]
+            assert preferences.json()["locationId"] == location_id
+            personalized = api.get("/news", headers=reader_headers)
+            assert personalized.status_code == 200, personalized.text
+            assert len(personalized.json()) == 28
+            position = next(i for i, item in enumerate(personalized.json()) if item["id"] == str(target["_id"]))
+            route = f"/news/{target['slug']}/interactions"
+            for kind, payload in (
+                ("opened", {"feedPosition": position}),
+                ("opened", {"feedPosition": position, "dwellTimeSeconds": 35}),
+                ("read", {"dwellTimeSeconds": 45}),
+                ("read", {"dwellTimeSeconds": 45}),
+            ):
+                interaction = api.post(f"{route}/{kind}", headers=reader_headers, json=payload)
+                assert interaction.status_code == 200, interaction.text
+            assert interaction.json()["recordedNow"] is False
+            assert database.userInteractions.count_documents({}) == 2
+            profile = api.get("/profile", headers=reader_headers).json()
+            assert {item["topic"] for item in profile["inferredInterests"]} == set(target["topics"])
+            assert all(item["score"] == 0.1 for item in profile["inferredInterests"])
+            refreshed = api.get("/news", headers=reader_headers)
+            assert refreshed.status_code == 200
+            assert len({item["id"] for item in refreshed.json()}) == 28
+            print("Hosting CORS, preferencias, feed, lectura idempotente y aprendizaje MongoDB: OK")
             for topic in TOPICS:
                 response = chat.post(
                     "/chat",

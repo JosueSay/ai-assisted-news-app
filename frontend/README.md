@@ -1,9 +1,13 @@
 # Frontend
 
-App móvil (Expo + React Native + TypeScript) con login de Google y un feed de
-noticias leído desde la API `news-api` conectada a MongoDB. Corre igual en
-iPhone y Android sin necesitar Mac ni cuenta de Apple para probarla, usando la
-app **Expo Go**.
+App Expo + React Native + TypeScript con Firebase Auth y feed personalizado desde
+`news-api` y MongoDB. La web funciona en navegadores de escritorio y teléfono.
+Google Sign-In nativo requiere un build propio; Expo Go solo permite comprobar
+los recorridos compatibles con su cliente, como el invitado Firebase.
+
+Para publicar el portal, sigue la [guía Firebase paso a paso](../docs/deploy/firebase-paso-a-paso.md).
+`make firebase-check-config` valida los parámetros y `make firebase-deploy` genera
+el export web y lo publica en Hosting.
 
 ## Ejecutar
 

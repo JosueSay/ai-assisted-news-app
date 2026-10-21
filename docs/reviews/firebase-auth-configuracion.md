@@ -5,6 +5,10 @@ Fecha: 2026-10-18.
 Este documento cubre únicamente el punto 1: Firebase Authentication. Los puntos
 2–8 quedan fuera de este loop.
 
+Para configurar y desplegar el sistema actual completo, sigue la
+[guía Firebase paso a paso](../deploy/firebase-paso-a-paso.md), que incluye
+Hosting, Cloud Run, Atlas, CORS y comprobación del feed personalizado.
+
 ## Estado de implementación
 
 El código de Firebase Auth está integrado en el frontend, la API de noticias y el

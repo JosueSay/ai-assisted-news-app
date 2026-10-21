@@ -25,6 +25,12 @@ make setup-keys
 
 Crea los archivos faltantes vacíos. No sobrescribe archivos existentes.
 
+Para Cloud Run se usa la misma lista: el operador ejecuta `make gcp-secrets`
+para cargar estos archivos en Secret Manager. Con `CHATBOT_PROVIDER=stub` OpenAI
+es opcional. El despliegue actual con Firebase Auth no requiere contraseña admin
+local ni otro archivo secreto. Consulta la
+[guía de despliegue](../docs/deploy/firebase-paso-a-paso.md).
+
 ## Formato esperado
 
 ### `mongodb_uri`

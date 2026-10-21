@@ -3,8 +3,18 @@
 .PHONY: chatbot-stub chatbot-api chatbot-openai chatbot-config-test
 .PHONY: db-news-images-check
 .PHONY: gcp-bootstrap gcp-secrets gcp-deploy
+.PHONY: deploy-test firebase-check-config firebase-deploy
 
+# El .env local de Compose puede contener localhost y otro proyecto Firebase.
+# Los comandos cloud usan el entorno/config.sh y el frontend usa sus propios .env.
+CLOUD_TARGETS := gcp-bootstrap gcp-secrets gcp-deploy firebase-check-config firebase-deploy deploy-test
+ifneq ($(filter $(CLOUD_TARGETS),$(MAKECMDGOALS)),)
+ifneq ($(filter-out $(CLOUD_TARGETS),$(MAKECMDGOALS)),)
+$(error Ejecuta las tareas locales y cloud en comandos make separados)
+endif
+else
 -include .env
+endif
 
 DOCKER_COMPOSE ?= docker compose
 NEWS_DB_MODE ?= local
@@ -20,6 +30,7 @@ export NEWS_MONGODB_REQUIRED
 export NEWS_MONGODB_TIMEOUT_MS
 export NEWS_LOCAL_MONGO_PORT
 export NEWS_API_PORT
+export NEWS_FIREBASE_PROJECT_ID
 export COMPOSE_PROFILES
 # Parámetros no secretos para seleccionar OpenAI sin interpolarlos en shell.
 export OPENAI_MODEL
@@ -222,3 +233,12 @@ gcp-secrets:
 
 gcp-deploy:
 	@bash deploy/gcp/deploy.sh
+
+deploy-test:
+	@python3 -m unittest discover -s tests/unit -p test_deploy_scripts.py -v
+
+firebase-check-config:
+	@bash deploy/firebase/hosting.sh --check
+
+firebase-deploy:
+	@bash deploy/firebase/hosting.sh

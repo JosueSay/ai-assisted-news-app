@@ -11,5 +11,7 @@ Fuente central para decisiones y contratos que afectan a más de un servicio.
   puntos con estado actual, tareas concretas, alcance, abordaje y resultado esperado.
 - [Firebase: configuración y verificación](reviews/firebase-auth-configuracion.md):
   guía del punto 1, conservada separadamente del alcance general.
+- [Desplegar con Firebase paso a paso](deploy/firebase-paso-a-paso.md): configuración
+  de Auth, Cloud Run, Atlas y publicación del portal en Hosting.
 
 La documentación específica de un servicio permanece junto al servicio correspondiente.

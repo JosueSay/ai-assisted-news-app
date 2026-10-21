@@ -10,6 +10,12 @@ cd "$(dirname "$0")/../.."
 source deploy/gcp/config.sh
 require_project
 
+# El delimitador alternativo preserva las listas CORS separadas por comas.
+if [[ "$NEWS_API_ALLOWED_ORIGINS" == *'|'* || "$CHATBOT_ALLOWED_ORIGINS" == *'|'* ]]; then
+  echo "Las listas de orígenes no pueden contener |." >&2
+  exit 1
+fi
+
 if [[ "$CHATBOT_PROVIDER" == "openai" ]] \
   && [[ -z "$NEWS_CHAT_INPUT_USD_PER_MILLION" || -z "$NEWS_CHAT_OUTPUT_USD_PER_MILLION" ]]; then
   echo "Con CHATBOT_PROVIDER=openai define NEWS_CHAT_INPUT_USD_PER_MILLION y NEWS_CHAT_OUTPUT_USD_PER_MILLION." >&2
@@ -48,8 +54,8 @@ gcloud run deploy "$NEWS_API_SERVICE" "${common[@]}" \
   --service-account "$(sa_email "$NEWS_API_SA")" \
   --port 8020 \
   --concurrency 40 \
-  --set-secrets "/secrets/mongodb/uri=${SECRET_MONGODB_URI}:latest,/secrets/admin/password=${SECRET_ADMIN_PASSWORD}:latest" \
-  --set-env-vars "NEWS_DB_MODE=atlas,NEWS_MONGODB_DATABASE=${NEWS_MONGODB_DATABASE},NEWS_MONGODB_REQUIRED=true,NEWS_MONGODB_URI_FILE=/secrets/mongodb/uri,NEWS_ADMIN_PASSWORD_FILE=/secrets/admin/password"
+  --set-secrets "/secrets/mongodb/uri=${SECRET_MONGODB_URI}:latest" \
+  --set-env-vars "^|^NEWS_DB_MODE=atlas|NEWS_MONGODB_DATABASE=${NEWS_MONGODB_DATABASE}|NEWS_MONGODB_REQUIRED=true|NEWS_MONGODB_URI_FILE=/secrets/mongodb/uri|NEWS_FIREBASE_PROJECT_ID=${NEWS_FIREBASE_PROJECT_ID}|NEWS_API_ALLOWED_ORIGINS=${NEWS_API_ALLOWED_ORIGINS}"
 
 chatbot_secrets="/secrets/mongodb/uri=${SECRET_MONGODB_URI}:latest"
 if [[ "$CHATBOT_PROVIDER" == "openai" ]]; then
@@ -63,7 +69,7 @@ gcloud run deploy "$CHATBOT_SERVICE" "${common[@]}" \
   --port 8010 \
   --concurrency 20 \
   --set-secrets "$chatbot_secrets" \
-  --set-env-vars "MONGODB_CONTEXT_MODE=news,MONGODB_REQUIRED=true,NEWS_DB_MODE=atlas,NEWS_MONGODB_DATABASE=${NEWS_MONGODB_DATABASE},NEWS_MONGODB_URI_FILE=/secrets/mongodb/uri,OPENAI_API_KEY_FILE=/secrets/openai/key,CHATBOT_PROVIDER=${CHATBOT_PROVIDER},OPENAI_MODEL=${OPENAI_MODEL},NEWS_CHAT_INPUT_USD_PER_MILLION=${NEWS_CHAT_INPUT_USD_PER_MILLION},NEWS_CHAT_OUTPUT_USD_PER_MILLION=${NEWS_CHAT_OUTPUT_USD_PER_MILLION},NEWS_AI_BUDGET_USD=${NEWS_AI_BUDGET_USD},CHAT_SESSION_TTL_SECONDS=3600,CHATBOT_PROMPT_FILE=prompts/news.md"
+  --set-env-vars "^|^MONGODB_CONTEXT_MODE=news|MONGODB_REQUIRED=true|NEWS_DB_MODE=atlas|NEWS_MONGODB_DATABASE=${NEWS_MONGODB_DATABASE}|NEWS_MONGODB_URI_FILE=/secrets/mongodb/uri|NEWS_FIREBASE_PROJECT_ID=${NEWS_FIREBASE_PROJECT_ID}|CHATBOT_ALLOWED_ORIGINS=${CHATBOT_ALLOWED_ORIGINS}|OPENAI_API_KEY_FILE=/secrets/openai/key|CHATBOT_PROVIDER=${CHATBOT_PROVIDER}|OPENAI_MODEL=${OPENAI_MODEL}|NEWS_CHAT_INPUT_USD_PER_MILLION=${NEWS_CHAT_INPUT_USD_PER_MILLION}|NEWS_CHAT_OUTPUT_USD_PER_MILLION=${NEWS_CHAT_OUTPUT_USD_PER_MILLION}|NEWS_AI_BUDGET_USD=${NEWS_AI_BUDGET_USD}|CHAT_SESSION_TTL_SECONDS=3600|CHATBOT_PROMPT_FILE=prompts/news.md"
 
 if [[ "${ALLOW_PUBLIC:-0}" == "1" ]]; then
   for service in "$NEWS_API_SERVICE" "$CHATBOT_SERVICE"; do

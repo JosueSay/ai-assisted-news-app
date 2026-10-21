@@ -26,7 +26,6 @@ DEPLOYER_SA="${DEPLOYER_SA:-gh-deployer}"
 
 # Secret Manager. El valor se carga con load-secrets.sh desde keys/.
 SECRET_MONGODB_URI="${SECRET_MONGODB_URI:-news-mongodb-uri}"
-SECRET_ADMIN_PASSWORD="${SECRET_ADMIN_PASSWORD:-news-admin-password}"
 SECRET_OPENAI_API_KEY="${SECRET_OPENAI_API_KEY:-openai-api-key}"
 
 # GitHub Actions con Workload Identity Federation (sin llaves JSON).
@@ -36,20 +35,28 @@ WIF_PROVIDER="${WIF_PROVIDER:-ai-news-repo}"
 
 # Aplicación.
 NEWS_MONGODB_DATABASE="${NEWS_MONGODB_DATABASE:-ai_assisted_news}"
+# Firebase Auth y Hosting usan este proyecto; por defecto, el mismo de Cloud Run.
+NEWS_FIREBASE_PROJECT_ID="${NEWS_FIREBASE_PROJECT_ID:-$PROJECT_ID}"
+NEWS_API_ALLOWED_ORIGINS="${NEWS_API_ALLOWED_ORIGINS:-https://${NEWS_FIREBASE_PROJECT_ID}.web.app,https://${NEWS_FIREBASE_PROJECT_ID}.firebaseapp.com}"
+CHATBOT_ALLOWED_ORIGINS="${CHATBOT_ALLOWED_ORIGINS:-$NEWS_API_ALLOWED_ORIGINS}"
 CHATBOT_PROVIDER="${CHATBOT_PROVIDER:-openai}"
 OPENAI_MODEL="${OPENAI_MODEL:-gpt-5-mini}"
 # Precios del modelo en USD por millón de tokens. Obligatorios con openai.
 NEWS_CHAT_INPUT_USD_PER_MILLION="${NEWS_CHAT_INPUT_USD_PER_MILLION:-}"
 NEWS_CHAT_OUTPUT_USD_PER_MILLION="${NEWS_CHAT_OUTPUT_USD_PER_MILLION:-}"
 NEWS_AI_BUDGET_USD="${NEWS_AI_BUDGET_USD:-20}"
-# Límite de instancias: acota costo de Cloud Run y de IA mientras no exista auth.
+# Límite de instancias de Cloud Run; el chat exige Firebase ID tokens.
 MAX_INSTANCES="${MAX_INSTANCES:-2}"
 
 REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}"
 
 require_project() {
-  if [[ "$PROJECT_ID" == CAMBIAR* ]]; then
+  if [[ ! "$PROJECT_ID" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ || "$PROJECT_ID" == CAMBIAR* ]]; then
     echo "Define PROJECT_ID en deploy/gcp/config.sh o como variable de entorno." >&2
+    exit 1
+  fi
+  if [[ ! "$NEWS_FIREBASE_PROJECT_ID" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]]; then
+    echo "Define un NEWS_FIREBASE_PROJECT_ID válido." >&2
     exit 1
   fi
 }

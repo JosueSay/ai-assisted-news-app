@@ -37,7 +37,7 @@ for sa in "$NEWS_API_SA" "$CHATBOT_SA" "$DEPLOYER_SA"; do
 done
 
 step "Secretos (solo el contenedor, sin valor)"
-for secret in "$SECRET_MONGODB_URI" "$SECRET_ADMIN_PASSWORD" "$SECRET_OPENAI_API_KEY"; do
+for secret in "$SECRET_MONGODB_URI" "$SECRET_OPENAI_API_KEY"; do
   exists gcloud secrets describe "$secret" \
     || gcloud secrets create "$secret" --replication-policy automatic
 done
@@ -49,7 +49,6 @@ grant_secret() {
 }
 # Cada servicio lee solo los secretos que necesita.
 grant_secret "$SECRET_MONGODB_URI" "$NEWS_API_SA"
-grant_secret "$SECRET_ADMIN_PASSWORD" "$NEWS_API_SA"
 grant_secret "$SECRET_MONGODB_URI" "$CHATBOT_SA"
 grant_secret "$SECRET_OPENAI_API_KEY" "$CHATBOT_SA"
 
