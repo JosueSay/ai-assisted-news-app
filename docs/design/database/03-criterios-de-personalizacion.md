@@ -3,9 +3,8 @@
 Parte de la [documentación de base de datos](README.md).
 
 Reglas sobre los datos que sostienen la experiencia personalizada: qué interacciones se registran,
-cómo se distinguen los intereses declarados de los inferidos, qué papel cumple la ubicación y qué
-señales intervienen en el orden del feed. La documentación indica qué datos entran en cada
-criterio, no el algoritmo que los combina.
+cómo se distinguen los intereses declarados de los inferidos, qué papel cumple la ubicación, cómo
+se puntúa el feed y qué diversidad se conserva.
 
 ## Interacciones registradas
 
@@ -28,6 +27,11 @@ Reglas:
   el registro de la interacción.
 - Cada interacción conserva en `context` la ubicación vigente y la posición en el feed, de modo
   que el registro siga siendo interpretable aunque el usuario cambie de ubicación más adelante.
+- Para la primera versión, se conserva un evento por combinación de usuario, noticia y tipo. Un
+  reintento secuencial no crea otra interacción ni duplica su aporte. La primera ubicación y
+  posición se preservan; el tiempo activo de `opened` puede actualizarse al salir de la noticia.
+- El índice compuesto de usuario/noticia/tipo es de consulta, no único: esta deduplicación no es
+  una garantía ante escrituras concurrentes.
 
 ## Intereses
 
@@ -47,6 +51,13 @@ Reglas:
 - `inferredInterests[].updatedAt` indica la última vez que ese tema cambió de puntaje.
 - Los temas de `inferredInterests` comparten vocabulario con `news.topics`, que es el campo con el
   que se comparan.
+- Una apertura aporta `0.02` una sola vez cuando acumula al menos 30 segundos activos; una lectura
+  al 90 % aporta `0.08` una sola vez. Si todo el cuerpo cabe en el viewport, se requieren además
+  5 segundos activos con al menos 90 % visible, para no convertir una apertura fugaz en lectura.
+  Cada aporte se aplica a cada tema de la noticia y el puntaje se limita a `1.0`. Los temas
+  declarados no se modifican por este cálculo.
+- El backend reconstruye los puntajes a partir de las interacciones persistidas; repetir una
+  petición puede reparar una escritura parcial sin sumar dos veces el mismo tipo de evento.
 
 ## Ubicación
 
@@ -86,16 +97,42 @@ Reglas:
 
 - No existe ningún campo con el que el autor pueda elevar la posición de su propia noticia. El
   orden depende exclusivamente de las señales de la tabla.
-- La combinación concreta de esas señales queda fuera de esta documentación: aquí se fija qué
-  datos están disponibles y cuáles no pueden intervenir.
+- Se suman estos componentes deterministas, sin añadir campos ni requerir un modelo de IA:
+
+  | Componente | Puntuación |
+  | --- | --- |
+  | Ubicación exacta en `geographicScope.locationIds` | 30 |
+  | Alcance `international`, si no hubo coincidencia exacta | 10 |
+  | Una o más coincidencias con `onboarding.selectedTopics` | 20 |
+  | Interés inferido coincidente | `20 × el mayor score coincidente` |
+  | Actualidad | `max(0, 20 × (1 − edad_en_días / 14))`; fecha futura cuenta como edad cero |
+
+- Una fecha de publicación ausente aporta cero puntos de actualidad. Se ordena por puntuación
+  descendente, fecha de publicación descendente e identificador ascendente. El servidor puntúa
+  todos los candidatos `published` antes de devolver como máximo 50; el cliente conserva ese orden.
+- La razón de selección expuesta al lector identifica la señal positiva de mayor puntuación; los
+  empates siguen el orden ubicación, tema declarado, interés inferido y actualidad.
+- Al salir del detalle se vuelve a consultar el feed después de finalizar el envío del tiempo
+  activo. Una lectura que termina de guardarse después también provoca una nueva consulta.
+  Mientras el detalle está abierto, el ranking y las mediciones de lectura se mantienen estables.
 
 ## Diversidad del feed
 
 Requisito del proyecto sobre la composición del feed:
 
-- El feed debe poder exponer contenido importante de alcance local, nacional o internacional
+- El feed debe poder exponer contenido relevante por alcance local, nacional o internacional
   aunque no coincida con los intereses aprendidos del usuario.
 - Los campos que hacen posible cumplirlo son `news.geographicScope.level` y
   `news.publishedAt`, que permiten identificar contenido relevante con independencia de
   `inferredInterests`.
-- La forma de reservar ese espacio en el feed no se define aquí.
+- La cobertura geográfica y la actualidad son el proxy disponible; no representan una declaración
+  editorial de importancia ni sustituyen una decisión de revisión de contenido.
+- En las primeras diez posiciones se reservan, cuando existe contenido, las posiciones 4 y 9 para
+  las noticias más recientes de alcance internacional o con ubicación distinta de la persona.
+  Si falta oferta, la posición se completa con la siguiente noticia del ranking; nunca se inventa
+  contenido. La noticia reservada explica que amplía la cobertura geográfica.
+- Las reservas eligen entre noticias aún no mostradas por fecha de publicación descendente e
+  identificador ascendente en caso de empate, con fechas ausentes al final. Los temas declarados
+  y los intereses inferidos no alteran ese orden de diversidad.
+- Las posiciones 1–3, que se muestran como principal y secundarias, respetan el orden compuesto por
+  el servidor. La diversidad no elimina noticias locales pertinentes ni cambia sus datos.

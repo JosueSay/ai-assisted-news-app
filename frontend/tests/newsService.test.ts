@@ -3,9 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NewsArticle } from "../src/types";
 import {
   fetchNewsFeedWithStatus,
+  fetchNewsProfile,
   fetchAuthenticatedProfile,
   getArticleBySlug,
   getFeaturedArticles,
+  getLatestArticles,
+  recordNewsInteraction,
   searchArticles,
 } from "../src/services/newsService";
 
@@ -100,6 +103,79 @@ describe("newsService", () => {
     expect(result.error).toBeNull();
     expect(result.articles).toHaveLength(2);
     expect(result.articles[0].slug).toBe("sensores-huertos-urbanos");
+  });
+
+  it("preserves personalized server order and sends the verified identity", async () => {
+    const serverOrder = [
+      { ...articles[1], feedReason: "Por tu ubicación" },
+      { ...articles[0], feedReason: "Para ampliar tu cobertura" },
+      { ...articles[0], id: "3" },
+      { ...articles[1], id: "4" },
+    ];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+      ok: true,
+      json: async () => serverOrder,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchNewsFeedWithStatus("verified-id-token");
+
+    expect(result.articles.map((article) => article.id)).toEqual(["2", "1", "3", "4"]);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/\/news$/), {
+      headers: { Authorization: "Bearer verified-id-token" },
+    });
+    expect(getLatestArticles(serverOrder, 1)[0].id).toBe("4");
+  });
+
+  it("loads the account-scoped profile with its Firebase token", async () => {
+    const profile = {
+      locationId: "country-id",
+      locationName: "Guatemala",
+      selectedTopics: ["tecnologia"],
+      inferredInterests: [],
+      onboardingCompleted: true,
+    };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+      ok: true,
+      json: async () => profile,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await fetchNewsProfile("verified-id-token")).toEqual(profile);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/\/profile$/), {
+      headers: { Authorization: "Bearer verified-id-token" },
+    });
+  });
+
+  it("retries transient interaction failures without changing the event identity", async () => {
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) => Promise.resolve({ ok: true, status: 200 }))
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await recordNewsInteraction("verified-id-token", "slug-prueba", "read", {
+      dwellTimeSeconds: 45,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const request = {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer verified-id-token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ dwellTimeSeconds: 45 }),
+    };
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/\/slug-prueba\/interactions\/read$/),
+      request,
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/\/slug-prueba\/interactions\/read$/),
+      request,
+    );
   });
 
   it("returns an empty feed when MongoDB/API cannot be read", async () => {

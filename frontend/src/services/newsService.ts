@@ -29,6 +29,14 @@ export type AuthenticatedProfile = {
   role: UserRole;
 };
 
+export type NewsProfile = {
+  locationId: string;
+  locationName: string;
+  selectedTopics: CategoryId[];
+  inferredInterests: { topic: CategoryId; score: number; updatedAt: string }[];
+  onboardingCompleted: boolean;
+};
+
 export type AdminNewsCreateInput = {
   title: string;
   slug: string;
@@ -71,16 +79,18 @@ export async function fetchNewsFeed(): Promise<NewsArticle[]> {
   return result.articles;
 }
 
-export async function fetchNewsFeedWithStatus(): Promise<NewsFeedResult> {
+export async function fetchNewsFeedWithStatus(idToken?: string): Promise<NewsFeedResult> {
   try {
     const baseUrl = requireApiBaseUrl();
-    const response = await fetch(`${baseUrl}/news`);
+    const response = await fetch(`${baseUrl}/news`, {
+      headers: idToken ? { Authorization: `Bearer ${idToken}` } : undefined,
+    });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
     const articles = (await response.json()) as NewsArticle[];
     return {
-      articles: sortByPublishedAt(articles),
+      articles,
       error: null,
     };
   } catch {
@@ -123,6 +133,70 @@ export async function fetchLocations(): Promise<NewsLocation[]> {
   return (await response.json()) as NewsLocation[];
 }
 
+export async function fetchNewsProfile(idToken: string): Promise<NewsProfile> {
+  const response = await fetch(`${requireApiBaseUrl()}/profile`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!response.ok) throw new Error("No pudimos cargar tus preferencias.");
+  return (await response.json()) as NewsProfile;
+}
+
+export async function updateNewsProfile(
+  idToken: string,
+  locationId: string,
+  selectedTopics: CategoryId[],
+): Promise<NewsProfile> {
+  const response = await fetch(`${requireApiBaseUrl()}/profile`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ locationId, selectedTopics }),
+  });
+  if (!response.ok) {
+    let message = "No pudimos guardar tus preferencias.";
+    try {
+      const body = (await response.json()) as { detail?: string };
+      if (body.detail) message = body.detail;
+    } catch {
+      // Keep the generic message when the server does not return JSON.
+    }
+    throw new Error(message);
+  }
+  return (await response.json()) as NewsProfile;
+}
+
+export async function recordNewsInteraction(
+  idToken: string,
+  slug: string,
+  type: "opened" | "read",
+  payload: { feedPosition?: number | null; dwellTimeSeconds?: number | null } = {},
+): Promise<void> {
+  const url = `${requireApiBaseUrl()}/news/${encodeURIComponent(slug)}/interactions/${type}`;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      if (response.ok) return;
+      lastError = new Error(`HTTP ${response.status}`);
+      if (response.status < 500) break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw new Error(
+    lastError instanceof Error ? lastError.message : "No pudimos registrar la lectura.",
+  );
+}
+
 export async function createAdminNews(
   token: string,
   input: AdminNewsCreateInput,
@@ -149,13 +223,6 @@ export async function createAdminNews(
   return (await response.json()) as NewsArticle;
 }
 
-function sortByPublishedAt(articles: NewsArticle[]): NewsArticle[] {
-  return [...articles].sort(
-    (first, second) =>
-      new Date(second.publishedAt).getTime() - new Date(first.publishedAt).getTime(),
-  );
-}
-
 export function getArticleBySlug(slug: string, articles: NewsArticle[] = []) {
   return articles.find((article) => article.slug === slug) ?? null;
 }
@@ -169,12 +236,7 @@ export function getFeaturedArticles(articles: NewsArticle[] = []) {
 }
 
 export function getLatestArticles(articles: NewsArticle[] = [], limit = 6) {
-  return [...articles]
-    .sort(
-      (first, second) =>
-        new Date(second.publishedAt).getTime() - new Date(first.publishedAt).getTime(),
-    )
-    .slice(0, limit);
+  return articles.slice(3, 3 + limit);
 }
 
 export function getArticlesByCategory(category: CategoryId, articles: NewsArticle[] = []) {

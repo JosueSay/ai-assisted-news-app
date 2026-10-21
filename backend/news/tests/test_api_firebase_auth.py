@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from bson import ObjectId
@@ -19,6 +20,13 @@ class FakeCollection:
                 return document
         return None
 
+    def find(self, query):
+        return [
+            document
+            for document in self.documents
+            if all(document.get(key) == value for key, value in query.items())
+        ]
+
     def insert_one(self, document):
         self.documents.append(document)
         return SimpleNamespace(inserted_id=document["_id"])
@@ -26,7 +34,12 @@ class FakeCollection:
     def update_one(self, query, update):
         document = self.find_one(query)
         if document:
-            document.update(update.get("$set", {}))
+            for field, value in update.get("$set", {}).items():
+                target = document
+                path = field.split(".")
+                for key in path[:-1]:
+                    target = target.setdefault(key, {})
+                target[path[-1]] = value
         return SimpleNamespace(matched_count=1 if document else 0)
 
 
@@ -47,6 +60,7 @@ class FakeDatabase:
             ),
             "users": FakeCollection(),
             "news": FakeCollection(),
+            "userInteractions": FakeCollection(),
             "auditLogs": FakeCollection(),
         }
 
@@ -82,6 +96,7 @@ def test_api_requires_firebase_token_and_resolves_identity_from_verified_claims(
     monkeypatch.setattr("news.api.verify_firebase_bearer", verify)
     with TestClient(create_app()) as client:
         assert client.get("/auth/me").status_code == 401
+        assert client.get("/profile").status_code == 401
         assert client.get(
             "/auth/me", headers={"Authorization": "Bearer forged"}
         ).status_code == 401
@@ -144,3 +159,99 @@ def test_only_database_admin_can_create_news_not_client_role(monkeypatch):
     admin = database["users"].find_one({"firebaseUid": "firebase-admin-uid"})
     assert database["news"].documents[0]["authorId"] == admin["_id"]
     assert database["auditLogs"].documents[0]["actorId"] == admin["_id"]
+
+
+def test_profile_preferences_feed_and_reading_signals_are_user_scoped(monkeypatch):
+    database = FakeDatabase()
+    settings = SimpleNamespace(
+        firebase_project_id="news-project",
+        mongodb_database="ai_assisted_news",
+    )
+    monkeypatch.setattr("news.api.get_news_settings", lambda: settings)
+    monkeypatch.setattr("news.api.get_news_client", lambda _settings: FakeClient(database))
+    monkeypatch.setattr(
+        "news.api.verify_firebase_bearer",
+        lambda authorization, _project_id: FirebaseIdentity(
+            authorization.removeprefix("Bearer ") + "-uid", "reader@example.test", "Reader"
+        ),
+    )
+    headers = {"Authorization": "Bearer reader"}
+    published_at = datetime.now(timezone.utc)
+
+    with TestClient(create_app()) as client:
+        initial_profile = client.get("/profile", headers=headers)
+        assert initial_profile.status_code == 200
+        location_id = initial_profile.json()["locationId"]
+
+        saved_profile = client.patch(
+            "/profile",
+            headers=headers,
+            json={"locationId": location_id, "selectedTopics": ["tecnologia"]},
+        )
+        assert saved_profile.status_code == 200
+        assert saved_profile.json()["selectedTopics"] == ["tecnologia"]
+        assert saved_profile.json()["onboardingCompleted"] is True
+        other_profile = client.get(
+            "/profile", headers={"Authorization": "Bearer other"}
+        )
+        assert other_profile.status_code == 200
+        assert other_profile.json()["selectedTopics"] == []
+
+        user = database["users"].find_one({"firebaseUid": "reader-uid"})
+        news = {
+            "_id": ObjectId("670000000000000000000099"),
+            "slug": "lectura-prueba",
+            "title": "Lectura de tecnología",
+            "summary": "Resumen",
+            "content": "Contenido de prueba.",
+            "topics": ["tecnologia"],
+            "authorId": user["_id"],
+            "status": "published",
+            "publishedAt": published_at,
+            "estimatedReadingMinutes": 1,
+            "sources": [],
+            "image": {},
+            "geographicScope": {
+                "level": "country",
+                "locationIds": [user["simulatedLocationId"]],
+            },
+        }
+        database["news"].insert_one(news)
+
+        feed = client.get("/news", headers=headers)
+        assert feed.status_code == 200
+        assert feed.json()[0]["slug"] == "lectura-prueba"
+        assert feed.json()[0]["feedReason"] == "Por tu ubicación"
+
+        opened = client.post(
+            "/news/lectura-prueba/interactions/opened",
+            headers=headers,
+            json={"feedPosition": 0},
+        )
+        assert opened.status_code == 200
+        assert opened.json()["simulatedLocationId"] == location_id
+        assert client.post(
+            "/news/lectura-prueba/interactions/opened",
+            headers=headers,
+            json={"feedPosition": 9, "dwellTimeSeconds": 35},
+        ).status_code == 200
+        assert client.post(
+            "/news/lectura-prueba/interactions/read",
+            headers=headers,
+            json={"dwellTimeSeconds": 45},
+        ).status_code == 200
+        duplicate_read = client.post(
+            "/news/lectura-prueba/interactions/read",
+            headers=headers,
+            json={"dwellTimeSeconds": 45},
+        )
+
+    assert duplicate_read.json()["recordedNow"] is False
+    assert len(database["userInteractions"].documents) == 2
+    updated_user = database["users"].find_one({"firebaseUid": "reader-uid"})
+    assert updated_user["inferredInterests"][0]["score"] == 0.1
+    opened_record = next(
+        item for item in database["userInteractions"].documents if item["type"] == "opened"
+    )
+    assert opened_record["context"]["feedPosition"] == 0
+    assert opened_record["dwellTimeSeconds"] == 35

@@ -26,6 +26,7 @@ from .firebase_auth import (
 )
 from .models import (
     AuditAction,
+    InteractionType,
     ImageType,
     LocationLevel,
     NewsStatus,
@@ -43,7 +44,9 @@ from .models.news import (
     Verification,
 )
 from .models.reading_time import compute_reading_time
-from .topics import TOPICS
+from .interactions import record_interaction
+from .personalization import compose_feed, rank_news
+from .topics import TOPICS, normalize_topic
 from .user_accounts import UserAccountError, ensure_news_user
 
 CATEGORY_IDS = set(TOPICS)
@@ -96,6 +99,7 @@ class NewsArticleResponse(BaseModel):
     verification: VerificationResponse | None = None
     sources: list[Source] = Field(default_factory=list)
     aiAssistance: AiAssistance = Field(default_factory=AiAssistance)
+    feedReason: str | None = None
 
 
 class HealthResponse(BaseModel):
@@ -120,6 +124,59 @@ class AuthenticatedUserResponse(BaseModel):
     displayName: str
     photoUrl: str
     role: UserRole
+
+
+class InferredInterestResponse(BaseModel):
+    topic: str
+    score: float
+    updatedAt: datetime
+
+
+class UserProfileResponse(BaseModel):
+    locationId: str
+    locationName: str
+    selectedTopics: list[str]
+    inferredInterests: list[InferredInterestResponse]
+    onboardingCompleted: bool
+
+
+class UserProfileUpdateRequest(BaseModel):
+    locationId: str = Field(min_length=24, max_length=24)
+    selectedTopics: list[str] = Field(default_factory=list, max_length=len(TOPICS))
+
+    @field_validator("locationId", mode="before")
+    @classmethod
+    def normalize_location_id(cls, value):
+        return str(value).strip()
+
+    @field_validator("selectedTopics", mode="before")
+    @classmethod
+    def normalize_selected_topics(cls, value):
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("selectedTopics debe ser una lista.")
+        normalized = []
+        for topic in value:
+            canonical = normalize_topic(topic)
+            if canonical not in normalized:
+                normalized.append(canonical)
+        return normalized
+
+
+class InteractionRequest(BaseModel):
+    feedPosition: int | None = Field(default=None, ge=0)
+    dwellTimeSeconds: int | None = Field(default=None, ge=0)
+
+
+class InteractionResponse(BaseModel):
+    id: str
+    type: InteractionType
+    createdAt: datetime
+    dwellTimeSeconds: int | None
+    simulatedLocationId: str
+    feedPosition: int | None
+    recordedNow: bool
 
 
 class AdminNewsCreateRequest(BaseModel):
@@ -344,6 +401,39 @@ def get_authenticated_user(
 AuthenticatedUser = Annotated[dict[str, Any], Depends(get_authenticated_user)]
 
 
+def get_optional_authenticated_user(
+    request: Request, authorization: str | None = Header(default=None)
+) -> dict[str, Any] | None:
+    """Keep public reading available while personalizing verified sessions."""
+    if not authorization:
+        return None
+    return get_authenticated_user(request, authorization)
+
+
+OptionalAuthenticatedUser = Annotated[
+    dict[str, Any] | None, Depends(get_optional_authenticated_user)
+]
+
+
+def _user_profile_response(database, user: dict[str, Any]) -> UserProfileResponse:
+    location = database["locations"].find_one(
+        {"_id": user["simulatedLocationId"], "active": True},
+        {"name": 1},
+    )
+    if not location:
+        raise HTTPException(status_code=409, detail="Tu ubicación ya no está disponible.")
+    return UserProfileResponse(
+        locationId=str(user["simulatedLocationId"]),
+        locationName=str(location["name"]),
+        selectedTopics=(user.get("onboarding") or {}).get("selectedTopics") or [],
+        inferredInterests=[
+            InferredInterestResponse.model_validate(item)
+            for item in user.get("inferredInterests") or []
+        ],
+        onboardingCompleted=bool((user.get("onboarding") or {}).get("completed")),
+    )
+
+
 def _source_from_request(
     payload: AdminNewsCreateRequest, now: datetime
 ) -> list[Source]:
@@ -486,7 +576,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=_allowed_origins(),
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "PATCH", "POST"],
         allow_headers=["Content-Type", "Authorization"],
     )
 
@@ -508,17 +598,21 @@ def create_app() -> FastAPI:
         )
 
     @application.get("/news", response_model=list[NewsArticleResponse])
-    async def news_feed(request: Request) -> list[NewsArticleResponse]:
+    async def news_feed(
+        request: Request, user: OptionalAuthenticatedUser
+    ) -> list[NewsArticleResponse]:
         settings = request.app.state.news_settings
         database = request.app.state.news_client[settings.mongodb_database]
         try:
-            cursor = (
-                database["news"]
-                .find({"status": "published"})
-                .sort("publishedAt", -1)
-                .limit(50)
-            )
-            return [document_to_article(database, document) for document in cursor]
+            documents = list(database["news"].find({"status": "published"}))
+            ranked = rank_news(documents, user)
+            composed = compose_feed(ranked, user, limit=50)
+            return [
+                document_to_article(database, item["document"]).model_copy(
+                    update={"feedReason": item["reason"]}
+                )
+                for item in composed
+            ]
         except PyMongoError as error:
             raise HTTPException(
                 status_code=503,
@@ -566,6 +660,109 @@ def create_app() -> FastAPI:
             displayName=user["displayName"],
             photoUrl=user["photoUrl"],
             role=user["role"],
+        )
+
+    @application.get("/profile", response_model=UserProfileResponse)
+    async def user_profile(request: Request, user: AuthenticatedUser):
+        settings = request.app.state.news_settings
+        database = request.app.state.news_client[settings.mongodb_database]
+        try:
+            return _user_profile_response(database, user)
+        except PyMongoError as error:
+            raise HTTPException(
+                status_code=503, detail="No fue posible leer tu perfil."
+            ) from error
+
+    @application.patch("/profile", response_model=UserProfileResponse)
+    async def update_user_profile(
+        payload: UserProfileUpdateRequest,
+        request: Request,
+        user: AuthenticatedUser,
+    ):
+        settings = request.app.state.news_settings
+        database = request.app.state.news_client[settings.mongodb_database]
+        location_id = _parse_object_id(payload.locationId, "locationId")
+        now = datetime.now(timezone.utc)
+        onboarding = user.get("onboarding") or {}
+        completed_at = onboarding.get("completedAt") or now
+        try:
+            location = database["locations"].find_one(
+                {"_id": location_id, "active": True}, {"_id": 1}
+            )
+            if not location:
+                raise HTTPException(
+                    status_code=400, detail="La ubicación seleccionada no existe."
+                )
+            database["users"].update_one(
+                {"_id": user["_id"]},
+                {
+                    "$set": {
+                        "simulatedLocationId": location_id,
+                        "onboarding.selectedTopics": payload.selectedTopics,
+                        "onboarding.completed": True,
+                        "onboarding.completedAt": completed_at,
+                        "updatedAt": now,
+                    }
+                },
+            )
+            updated_user = {
+                **user,
+                "simulatedLocationId": location_id,
+                "onboarding": {
+                    **onboarding,
+                    "selectedTopics": payload.selectedTopics,
+                    "completed": True,
+                    "completedAt": completed_at,
+                },
+                "updatedAt": now,
+            }
+            return _user_profile_response(database, updated_user)
+        except PyMongoError as error:
+            raise HTTPException(
+                status_code=503, detail="No fue posible guardar tus preferencias."
+            ) from error
+
+    @application.post(
+        "/news/{slug}/interactions/{interaction_type}",
+        response_model=InteractionResponse,
+    )
+    async def news_interaction(
+        slug: str,
+        interaction_type: str,
+        payload: InteractionRequest,
+        request: Request,
+        user: AuthenticatedUser,
+    ):
+        if interaction_type not in {InteractionType.opened.value, InteractionType.read.value}:
+            raise HTTPException(status_code=404, detail="Tipo de interacción no disponible.")
+        settings = request.app.state.news_settings
+        database = request.app.state.news_client[settings.mongodb_database]
+        try:
+            news = database["news"].find_one({"slug": slug, "status": "published"})
+            if not news:
+                raise HTTPException(status_code=404, detail="Noticia no encontrada.")
+            interaction, created = record_interaction(
+                database,
+                user,
+                news,
+                interaction_type,
+                feed_position=payload.feedPosition,
+                dwell_time_seconds=payload.dwellTimeSeconds,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except PyMongoError as error:
+            raise HTTPException(
+                status_code=503, detail="No fue posible registrar la lectura."
+            ) from error
+        return InteractionResponse(
+            id=str(interaction["_id"]),
+            type=interaction["type"],
+            createdAt=interaction["createdAt"],
+            dwellTimeSeconds=interaction.get("dwellTimeSeconds"),
+            simulatedLocationId=str(interaction["context"]["simulatedLocationId"]),
+            feedPosition=interaction["context"].get("feedPosition"),
+            recordedNow=created,
         )
 
     @application.post(

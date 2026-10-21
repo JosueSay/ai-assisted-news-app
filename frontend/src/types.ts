@@ -59,6 +59,7 @@ export type NewsArticle = {
   readingMinutes: number;
   source: string;
   image: ArticleImage;
+  feedReason?: string | null;
 };
 
 export type AppUser = {

@@ -97,3 +97,11 @@ ejecutó esa operación ni tocó una DB real.
   `backend/news/user_accounts.py`, tres tests nuevos, `frontend/src/services/firebaseClient.ts`,
   este handoff y `docs/reviews/`. `docs/reviews/` ya estaba sin seguimiento antes del loop.
 - No se tocaron archivos secretos ni se leyó su contenido; no se modificó ninguna base real.
+
+## Ubicación de la guía (actualización documental 2026-10-18)
+
+La guía de configuración y verificación de Firebase se conserva en
+[firebase-auth-configuracion.md](../../../docs/reviews/firebase-auth-configuracion.md).
+El archivo [alcance-pendiente-proyecto-2.md](../../../docs/reviews/alcance-pendiente-proyecto-2.md)
+vuelve a reunir los ocho puntos seleccionados y sus tareas concretas. Esta separación
+no modifica la implementación ni las decisiones/resultados históricos de este handoff.

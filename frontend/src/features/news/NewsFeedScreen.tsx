@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AppState,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -42,16 +43,25 @@ import {
   fetchNewsFeedWithStatus,
   fetchNewsArticleBySlug,
   fetchLocations,
+  fetchNewsProfile,
   getArticleBySlug,
   getArticlesByCategory,
   getFeaturedArticles,
   getLatestArticles,
   getRelatedArticles,
   searchArticles,
+  recordNewsInteraction,
+  updateNewsProfile,
   type AdminNewsCreateInput,
   type NewsLocation,
+  type NewsProfile,
 } from "../../services/newsService";
 import { getCurrentFirebaseIdToken } from "../../services/firebaseClient";
+import {
+  activeReadingSeconds as calculateActiveReadingSeconds,
+  articleVisibleFraction,
+  shortArticleReadComplete,
+} from "./readingProgress";
 import { colors, fonts, layout, radii, shadows, spacing } from "../../theme";
 
 type Props = {
@@ -163,10 +173,13 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
   const isDesktop = width >= 1024;
 
   const [articles, setArticles] = useState<NewsArticle[]>([]);
+  const [rankedArticleIds, setRankedArticleIds] = useState<string[]>([]);
+  const [feedRefreshKey, setFeedRefreshKey] = useState(0);
   const [isFeedLoading, setIsFeedLoading] = useState(true);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [feedError, setFeedError] = useState<string | null>(null);
+  const hasLoadedFeedRef = useRef(false);
   const [route, setRoute] = useState<NewsRoute>(getInitialRoute);
   const [searchQuery, setSearchQuery] = useState("");
   const [savedIds, setSavedIds] = useState<string[]>([]);
@@ -178,17 +191,56 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
   const [isSubmittingAdminNews, setIsSubmittingAdminNews] = useState(false);
   const [adminFormError, setAdminFormError] = useState<string | null>(null);
   const [adminSuccess, setAdminSuccess] = useState<string | null>(null);
+  const [profile, setProfile] = useState<NewsProfile | null>(null);
+  const [profileDraft, setProfileDraft] = useState<{
+    locationId: string;
+    selectedTopics: CategoryId[];
+  } | null>(null);
+  const [isProfileLoading, setIsProfileLoading] = useState(true);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
+  const feedScrollRef = useRef<ScrollView>(null);
+  const scrollYRef = useRef(0);
+  const scrollViewportHeightRef = useRef(0);
+  const articleContainerTopRef = useRef(0);
+  const articleViewTopRef = useRef(0);
+  const articleBodyLayoutRef = useRef<{ top: number; height: number } | null>(null);
+  const articleBodyRelativeLayoutRef = useRef<{ y: number; height: number } | null>(null);
+  const readingSessionRef = useRef<{
+    slug: string;
+    feedPosition: number | null;
+    activeSeconds: number;
+    activeSince: number | null;
+    shortVisibleSeconds: number;
+    shortVisibleSince: number | null;
+    readSent: boolean;
+    readInFlight: boolean;
+  } | null>(null);
+  const openedRequestRef = useRef<Promise<void> | null>(null);
+  const finalReadingRequestRef = useRef<Promise<void> | null>(null);
+  const pendingFeedOpenRef = useRef<{ slug: string; position: number | null } | null>(null);
 
   const isAdmin = user.role === "admin";
+  const isReadingArticle = route.name === "article";
 
   useEffect(() => {
+    // Keep the current detail and its reading measurements stable until leaving it.
+    if (isReadingArticle && hasLoadedFeedRef.current) return;
     let active = true;
-    setIsFeedLoading(true);
-    void fetchNewsFeedWithStatus()
+    if (!hasLoadedFeedRef.current) setIsFeedLoading(true);
+    // The exit signal can add interests too; load the ranking after it settles.
+    void (finalReadingRequestRef.current ?? Promise.resolve())
+      .then(() => getCurrentFirebaseIdToken())
+      .then((token) => fetchNewsFeedWithStatus(token))
       .then((result) => {
         if (!active) return;
-        setArticles(result.articles);
         setFeedError(result.error);
+        if (!result.error) {
+          setArticles(result.articles);
+          setRankedArticleIds(result.articles.map((article) => article.id));
+          hasLoadedFeedRef.current = true;
+        }
       })
       .catch(() => {
         if (!active) return;
@@ -200,7 +252,7 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [feedRefreshKey, isReadingArticle]);
 
   useEffect(() => {
     AsyncStorage.getItem(SAVED_STORAGE_KEY)
@@ -211,7 +263,6 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!isAdmin) return;
     let active = true;
     setIsLocationsLoading(true);
     setLocationsError(null);
@@ -219,10 +270,12 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
       .then((items) => {
         if (!active) return;
         setLocations(items);
-        setAdminForm((current) => ({
-          ...current,
-          locationId: current.locationId || items[0]?.id || "",
-        }));
+        if (isAdmin) {
+          setAdminForm((current) => ({
+            ...current,
+            locationId: current.locationId || items[0]?.id || "",
+          }));
+        }
       })
       .catch(() => {
         if (active) setLocationsError("No pudimos cargar el catálogo de ubicaciones.");
@@ -234,6 +287,31 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
       active = false;
     };
   }, [isAdmin]);
+
+  useEffect(() => {
+    let active = true;
+    setIsProfileLoading(true);
+    setProfileError(null);
+    void getCurrentFirebaseIdToken()
+      .then(fetchNewsProfile)
+      .then((nextProfile) => {
+        if (!active) return;
+        setProfile(nextProfile);
+        setProfileDraft({
+          locationId: nextProfile.locationId,
+          selectedTopics: nextProfile.selectedTopics,
+        });
+      })
+      .catch(() => {
+        if (active) setProfileError("No pudimos cargar tus preferencias de noticias.");
+      })
+      .finally(() => {
+        if (active) setIsProfileLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user.id]);
 
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined") return;
@@ -267,6 +345,137 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
     () => (route.name === "article" ? getArticleBySlug(route.slug, articles) : null),
     [articles, route],
   );
+
+  const feedPositionById = useMemo(
+    () => new Map(rankedArticleIds.map((id, index) => [id, index] as const)),
+    [rankedArticleIds],
+  );
+
+  const activeReadingSeconds = useCallback((session: NonNullable<typeof readingSessionRef.current>) => {
+    return calculateActiveReadingSeconds(
+      session.activeSeconds,
+      session.activeSince,
+      Date.now(),
+    );
+  }, []);
+
+  const maybeRecordRead = useCallback(() => {
+    const session = readingSessionRef.current;
+    const body = articleBodyLayoutRef.current;
+    const currentSlug = currentArticle?.slug;
+    if (
+      !session || !currentSlug || session.slug !== currentSlug || !body ||
+      body.height <= 0 || session.readSent || session.readInFlight
+    ) return;
+    const visibleFraction = articleVisibleFraction(
+      scrollYRef.current,
+      scrollViewportHeightRef.current,
+      body.top,
+      body.height,
+    );
+    if (body.height <= scrollViewportHeightRef.current) {
+      if (visibleFraction < 0.9 || AppState.currentState !== "active") {
+        if (session.shortVisibleSince !== null) {
+          session.shortVisibleSeconds = calculateActiveReadingSeconds(
+            session.shortVisibleSeconds,
+            session.shortVisibleSince,
+            Date.now(),
+          );
+          session.shortVisibleSince = null;
+        }
+        return;
+      }
+      if (session.shortVisibleSince === null) session.shortVisibleSince = Date.now();
+      const visibleActiveSeconds = calculateActiveReadingSeconds(
+        session.shortVisibleSeconds,
+        session.shortVisibleSince,
+        Date.now(),
+      );
+      if (!shortArticleReadComplete(visibleFraction, visibleActiveSeconds)) return;
+    } else if (visibleFraction < 0.9) {
+      return;
+    }
+
+    session.readInFlight = true;
+    const duration = activeReadingSeconds(session);
+    void (openedRequestRef.current ?? Promise.resolve())
+      .then(async () => {
+        const token = await getCurrentFirebaseIdToken();
+        await recordNewsInteraction(token, session.slug, "read", {
+          dwellTimeSeconds: duration,
+        });
+        session.readSent = true;
+        setFeedRefreshKey((value) => value + 1);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        session.readInFlight = false;
+      });
+  }, [activeReadingSeconds, currentArticle?.slug]);
+
+  useEffect(() => {
+    if (route.name !== "article" || !currentArticle) return;
+    const session = {
+      slug: currentArticle.slug,
+      feedPosition:
+        pendingFeedOpenRef.current?.slug === currentArticle.slug
+          ? pendingFeedOpenRef.current.position
+          : null,
+      activeSeconds: 0,
+      activeSince: AppState.currentState === "active" ? Date.now() : null,
+      shortVisibleSeconds: 0,
+      shortVisibleSince: null,
+      readSent: false,
+      readInFlight: false,
+    };
+    pendingFeedOpenRef.current = null;
+    readingSessionRef.current = session;
+    articleBodyLayoutRef.current = null;
+    articleBodyRelativeLayoutRef.current = null;
+    scrollYRef.current = 0;
+    feedScrollRef.current?.scrollTo({ y: 0, animated: false });
+
+    openedRequestRef.current = getCurrentFirebaseIdToken()
+      .then((token) => recordNewsInteraction(token, session.slug, "opened", {
+        feedPosition: session.feedPosition,
+      }));
+    openedRequestRef.current.catch(() => undefined);
+    maybeRecordRead();
+
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active" && session.activeSince === null) {
+        session.activeSince = Date.now();
+        maybeRecordRead();
+      } else if (nextState !== "active" && session.activeSince !== null) {
+        session.activeSeconds += Math.floor((Date.now() - session.activeSince) / 1000);
+        session.activeSince = null;
+        if (session.shortVisibleSince !== null) {
+          session.shortVisibleSeconds = calculateActiveReadingSeconds(
+            session.shortVisibleSeconds,
+            session.shortVisibleSince,
+            Date.now(),
+          );
+          session.shortVisibleSince = null;
+        }
+      }
+    });
+    const readProgressTimer = setInterval(maybeRecordRead, 250);
+
+    return () => {
+      const duration = activeReadingSeconds(session);
+      session.activeSeconds = duration;
+      session.activeSince = null;
+      finalReadingRequestRef.current = getCurrentFirebaseIdToken()
+        .then((token) => recordNewsInteraction(token, session.slug, "opened", {
+          feedPosition: session.feedPosition,
+          dwellTimeSeconds: duration,
+        }))
+        .catch(() => undefined);
+      subscription.remove();
+      clearInterval(readProgressTimer);
+      if (readingSessionRef.current === session) readingSessionRef.current = null;
+    };
+  }, [activeReadingSeconds, currentArticle?.id, maybeRecordRead, route.name]);
 
   useEffect(() => {
     if (Platform.OS === "web" && typeof document !== "undefined") {
@@ -303,10 +512,55 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
     [articles, savedIds],
   );
 
-  const openArticle = useCallback(
-    (article: NewsArticle) => navigate({ name: "article", slug: article.slug }),
-    [navigate],
-  );
+  const openArticle = useCallback((article: NewsArticle) => {
+    const originatesInHomeFeed = route.name === "home" && !searchQuery.trim();
+    pendingFeedOpenRef.current = {
+      slug: article.slug,
+      position: originatesInHomeFeed ? feedPositionById.get(article.id) ?? null : null,
+    };
+    navigate({ name: "article", slug: article.slug });
+  }, [feedPositionById, navigate, route.name, searchQuery]);
+
+  const handleProfileChanged = useCallback((nextProfile: NewsProfile) => {
+    setProfile(nextProfile);
+    setProfileDraft({
+      locationId: nextProfile.locationId,
+      selectedTopics: nextProfile.selectedTopics,
+    });
+    setFeedRefreshKey((value) => value + 1);
+  }, []);
+
+  const toggleProfileTopic = useCallback((topic: CategoryId) => {
+    setProfileDraft((current) => {
+      if (!current) return current;
+      const selectedTopics = current.selectedTopics.includes(topic)
+        ? current.selectedTopics.filter((item) => item !== topic)
+        : [...current.selectedTopics, topic];
+      return { ...current, selectedTopics };
+    });
+  }, []);
+
+  const saveProfile = useCallback(async () => {
+    if (!profileDraft) return;
+    setIsSavingProfile(true);
+    setProfileError(null);
+    try {
+      const token = await getCurrentFirebaseIdToken();
+      const updated = await updateNewsProfile(
+        token,
+        profileDraft.locationId,
+        profileDraft.selectedTopics,
+      );
+      handleProfileChanged(updated);
+      setIsPreferencesOpen(false);
+    } catch (error) {
+      setProfileError(
+        error instanceof Error ? error.message : "No pudimos guardar tus preferencias.",
+      );
+    } finally {
+      setIsSavingProfile(false);
+    }
+  }, [handleProfileChanged, profileDraft]);
 
   const isSaved = useCallback(
     (article: NewsArticle) => savedIds.includes(article.id),
@@ -439,6 +693,118 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
       })}
     </View>
   );
+
+  const renderPreferences = () => {
+    if (!profile) {
+      return isProfileLoading ? (
+        <View style={styles.preferencesPanel}>
+          <ActivityIndicator color={colors.action} />
+          <Text style={styles.formHint}>Cargando tus preferencias de noticias.</Text>
+        </View>
+      ) : profileError ? (
+        <Text accessibilityRole="alert" style={styles.errorText}>{profileError}</Text>
+      ) : null;
+    }
+
+    if (profile.onboardingCompleted && !isPreferencesOpen) {
+      return (
+        <AppButton
+          label={`Personalizar feed · ${profile.locationName}`}
+          variant="secondary"
+          onPress={() => setIsPreferencesOpen(true)}
+        />
+      );
+    }
+
+    return (
+      <View style={styles.preferencesPanel}>
+        <View style={styles.preferencesHeader}>
+          <View style={styles.preferencesHeading}>
+            <Text style={styles.preferencesTitle}>
+              {profile.onboardingCompleted ? "Personaliza tu feed" : "Configura tu feed"}
+            </Text>
+            <Text style={styles.formHint}>
+              Elige manualmente una ubicación y los temas que quieres seguir. No usamos GPS.
+            </Text>
+          </View>
+          {profile.onboardingCompleted ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cerrar preferencias"
+              onPress={() => setIsPreferencesOpen(false)}
+              style={({ pressed }) => [styles.preferenceClose, pressed ? styles.pressed : null]}
+            >
+              <X size={20} color={colors.textSecondary} />
+            </Pressable>
+          ) : null}
+        </View>
+        {profileError ? <Text accessibilityRole="alert" style={styles.errorText}>{profileError}</Text> : null}
+        {locationsError ? <Text accessibilityRole="alert" style={styles.errorText}>{locationsError}</Text> : null}
+        {isProfileLoading || isLocationsLoading ? (
+          <View style={styles.inlineLoading}>
+            <ActivityIndicator color={colors.action} />
+            <Text style={styles.formHint}>Cargando opciones.</Text>
+          </View>
+        ) : (
+          <>
+            <Text style={styles.fieldLabel}>Ubicación</Text>
+            <View style={styles.formChips}>
+              {locations.map((location) => {
+                const selected = profileDraft?.locationId === location.id;
+                return (
+                  <Pressable
+                    key={location.id}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => setProfileDraft((current) => current
+                      ? { ...current, locationId: location.id }
+                      : current)}
+                    style={({ pressed }) => [
+                      styles.formChip,
+                      selected ? styles.formChipActive : null,
+                      pressed ? styles.pressed : null,
+                    ]}
+                  >
+                    <Text style={[styles.formChipLabel, selected ? styles.formChipLabelActive : null]}>
+                      {location.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.fieldLabel}>Temas</Text>
+            <View style={styles.formChips}>
+              {CATEGORIES.map((category) => {
+                const selected = Boolean(profileDraft?.selectedTopics.includes(category.id));
+                return (
+                  <Pressable
+                    key={category.id}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => toggleProfileTopic(category.id)}
+                    style={({ pressed }) => [
+                      styles.formChip,
+                      selected ? styles.formChipActive : null,
+                      pressed ? styles.pressed : null,
+                    ]}
+                  >
+                    <Text style={[styles.formChipLabel, selected ? styles.formChipLabelActive : null]}>
+                      {category.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <AppButton
+              label={isSavingProfile ? "Guardando…" : "Guardar preferencias"}
+              onPress={() => void saveProfile()}
+              disabled={isSavingProfile || !profileDraft || locations.length === 0}
+            />
+          </>
+        )}
+      </View>
+    );
+  };
 
   const renderInlineSearch = () => (
     <View style={styles.searchBox}>
@@ -792,6 +1158,7 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
       <>
         {renderNotice()}
         {renderInlineSearch()}
+        {renderPreferences()}
         {hasSearch ? (
           <View style={styles.searchResultsBlock}>
             <Text style={styles.resultsTitle}>Resultados</Text>
@@ -868,7 +1235,7 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
 
             {hasArticles ? (
             <View style={styles.section}>
-              {renderSectionTitle("Últimas noticias", "Actualidad reciente")}
+              {renderSectionTitle("Más noticias para ti", "Siguientes en tu feed")}
               <View style={styles.latestList}>
                 {latest.map((article) => (
                   <ArticleCard
@@ -974,7 +1341,20 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
           icon={<ArrowLeft size={18} color={colors.action} />}
         />
 
-        <View style={styles.articleView}>
+        <View
+          style={styles.articleView}
+          onLayout={(event) => {
+            articleViewTopRef.current = event.nativeEvent.layout.y;
+            const bodyLayout = articleBodyRelativeLayoutRef.current;
+            if (bodyLayout) {
+              articleBodyLayoutRef.current = {
+                top: articleContainerTopRef.current + articleViewTopRef.current + bodyLayout.y,
+                height: bodyLayout.height,
+              };
+              maybeRecordRead();
+            }
+          }}
+        >
           <Text style={styles.category}>{getCategoryLabel(currentArticle.category)}</Text>
           <Text style={styles.articleTitle}>{currentArticle.title}</Text>
           <Text style={styles.articleSummary}>{currentArticle.summary}</Text>
@@ -1025,7 +1405,20 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
             icon={<MessageCircle size={18} color={colors.action} />}
           />
 
-          <View style={styles.readerBody}>
+          <View
+            style={styles.readerBody}
+            onLayout={(event) => {
+              const { y, height } = event.nativeEvent.layout;
+              articleBodyRelativeLayoutRef.current = { y, height };
+              articleBodyLayoutRef.current = {
+                top: articleContainerTopRef.current
+                  + articleViewTopRef.current
+                  + y,
+                height,
+              };
+              maybeRecordRead();
+            }}
+          >
             {currentArticle.body.map((paragraph) => (
               <Text key={paragraph} style={styles.paragraph}>
                 {paragraph}
@@ -1063,6 +1456,7 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
           contextArticle={route.slug ? getArticleBySlug(route.slug, articles) : null}
           onClearContext={() => navigate({ name: "chat" }, true)}
           onOpenArticle={(slug) => navigate({ name: "article", slug })}
+          onProfileChanged={handleProfileChanged}
         />
       );
     }
@@ -1137,13 +1531,39 @@ export function NewsFeedScreen({ user, onSignOut }: Props) {
           <View style={[styles.container, styles.chatContainer]}>{renderContent()}</View>
         ) : (
           <ScrollView
+            ref={feedScrollRef}
+            onLayout={(event) => {
+              scrollViewportHeightRef.current = event.nativeEvent.layout.height;
+              maybeRecordRead();
+            }}
+            onScroll={(event) => {
+              scrollYRef.current = event.nativeEvent.contentOffset.y;
+              scrollViewportHeightRef.current = event.nativeEvent.layoutMeasurement.height;
+              maybeRecordRead();
+            }}
+            scrollEventThrottle={100}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={[
               styles.scrollContent,
               isMobile ? styles.scrollContentMobile : null,
             ]}
           >
-            <View style={styles.container}>{renderContent()}</View>
+            <View
+              style={styles.container}
+              onLayout={(event) => {
+                articleContainerTopRef.current = event.nativeEvent.layout.y;
+                const bodyLayout = articleBodyRelativeLayoutRef.current;
+                if (bodyLayout) {
+                  articleBodyLayoutRef.current = {
+                    top: articleContainerTopRef.current + articleViewTopRef.current + bodyLayout.y,
+                    height: bodyLayout.height,
+                  };
+                  maybeRecordRead();
+                }
+              }}
+            >
+              {renderContent()}
+            </View>
           </ScrollView>
         )}
       </KeyboardAvoidingView>
@@ -1336,6 +1756,37 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: spacing.xs,
     marginBottom: spacing.xl,
+  },
+  preferencesPanel: {
+    padding: spacing.lg,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radii.panel,
+    gap: spacing.md,
+  },
+  preferencesHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: spacing.md,
+  },
+  preferencesHeading: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  preferencesTitle: {
+    color: colors.ink,
+    fontFamily: fonts.heading,
+    fontSize: 24,
+    lineHeight: 29,
+  },
+  preferenceClose: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.pill,
   },
   chip: {
     minHeight: 44,
