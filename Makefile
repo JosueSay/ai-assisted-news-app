@@ -3,8 +3,18 @@
 .PHONY: chatbot-stub chatbot-api chatbot-openai chatbot-config-test
 .PHONY: db-news-images-check
 .PHONY: gcp-bootstrap gcp-secrets gcp-deploy
+.PHONY: deploy-test firebase-check-config firebase-deploy
 
+# El .env local de Compose puede contener localhost y otro proyecto Firebase.
+# Los comandos cloud usan el entorno/config.sh y el frontend usa sus propios .env.
+CLOUD_TARGETS := gcp-bootstrap gcp-secrets gcp-deploy firebase-check-config firebase-deploy deploy-test
+ifneq ($(filter $(CLOUD_TARGETS),$(MAKECMDGOALS)),)
+ifneq ($(filter-out $(CLOUD_TARGETS),$(MAKECMDGOALS)),)
+$(error Ejecuta las tareas locales y cloud en comandos make separados)
+endif
+else
 -include .env
+endif
 
 DOCKER_COMPOSE ?= docker compose
 NEWS_DB_MODE ?= local
@@ -20,6 +30,7 @@ export NEWS_MONGODB_REQUIRED
 export NEWS_MONGODB_TIMEOUT_MS
 export NEWS_LOCAL_MONGO_PORT
 export NEWS_API_PORT
+export NEWS_FIREBASE_PROJECT_ID
 export COMPOSE_PROFILES
 # Parámetros no secretos para seleccionar OpenAI sin interpolarlos en shell.
 export OPENAI_MODEL
@@ -41,9 +52,7 @@ define write_common_env
 		'NEWS_LOCAL_MONGO_PORT=27018' \
 		'NEWS_API_PORT=8020' \
 		'EXPO_PUBLIC_NEWS_API_BASE_URL=http://localhost:8020' \
-		'NEWS_ADMIN_USERNAME=admin' \
-		'NEWS_ADMIN_PASSWORD_FILE=keys/news_admin_password' \
-		'NEWS_ADMIN_TOKEN_TTL_SECONDS=3600' \
+		'NEWS_FIREBASE_PROJECT_ID=' \
 		'CHATBOT_PROVIDER=stub' \
 		'CHAT_SESSION_TTL_SECONDS=3600' \
 		'EXPO_PUBLIC_ASSISTANT_API_BASE_URL=http://localhost:8010'
@@ -197,7 +206,7 @@ news-contract-check:
 setup-keys:
 	@echo "=== Setting up secret files ==="
 	@mkdir -p keys
-	@for f in mongodb_uri news_admin_password openai_api_key client_id client_secret; do \
+	@for f in mongodb_uri openai_api_key; do \
 		if [ -e "keys/$$f" ] || [ -L "keys/$$f" ]; then \
 			echo "keys/$$f       EXISTS"; \
 		else \
@@ -224,3 +233,12 @@ gcp-secrets:
 
 gcp-deploy:
 	@bash deploy/gcp/deploy.sh
+
+deploy-test:
+	@python3 -m unittest discover -s tests/unit -p test_deploy_scripts.py -v
+
+firebase-check-config:
+	@bash deploy/firebase/hosting.sh --check
+
+firebase-deploy:
+	@bash deploy/firebase/hosting.sh

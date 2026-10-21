@@ -1,7 +1,7 @@
 """Configuración de pytest para tests de la base de datos de noticias."""
 
 import os
-from typing import Iterator
+from collections.abc import Iterator
 
 import pytest
 
@@ -17,9 +17,7 @@ def _clear_settings_cache() -> Iterator[None]:
     os.environ.pop("NEWS_MONGODB_DATABASE", None)
     os.environ.pop("NEWS_MONGODB_REQUIRED", None)
     os.environ.pop("NEWS_MONGODB_TIMEOUT_MS", None)
-    os.environ.pop("NEWS_ADMIN_USERNAME", None)
-    os.environ.pop("NEWS_ADMIN_PASSWORD_FILE", None)
-    os.environ.pop("NEWS_ADMIN_TOKEN_TTL_SECONDS", None)
+    os.environ.pop("NEWS_FIREBASE_PROJECT_ID", None)
     get_news_settings.cache_clear()
     yield
     get_news_settings.cache_clear()

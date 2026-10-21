@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from bson import ObjectId
 from news.demo_news import get_demo_news_documents
+from news.firebase_auth import FirebaseIdentity
 from news.models import ResponseIntent, ResponseStrategy
 from news.models.chat_session import ChatSession
 from news.seed_catalog import CATALOG_LOCATION_IDS, CATALOG_LOCATIONS, catalog_location_document
@@ -20,6 +21,7 @@ from assistant.news_chat.service import NewsChatService
 from assistant.tests.news_fakes import FakeDatabase, FakeProvider
 
 NOW = datetime(2026, 10, 15, 18, tzinfo=UTC)
+TEST_IDENTITY = FirebaseIdentity("firebase-db-queries")
 
 
 @pytest.fixture
@@ -45,15 +47,16 @@ def settings():
 
 
 def request(message, **kwargs):
-    return ChatRequest(
-        message=message,
-        user={"id": "guest:db-queries", "displayName": "Fixture"},
-        **kwargs,
-    )
+    return ChatRequest(message=message, **kwargs)
+
+
+class _ServiceWithTestIdentity(NewsChatService):
+    async def reply(self, request, *, identity=TEST_IDENTITY):
+        return await super().reply(request, identity=identity)
 
 
 def service(database, settings, provider):
-    return NewsChatService(settings, lambda: provider, database, clock=lambda: NOW)
+    return _ServiceWithTestIdentity(settings, lambda: provider, database, clock=lambda: NOW)
 
 
 @pytest.mark.parametrize(

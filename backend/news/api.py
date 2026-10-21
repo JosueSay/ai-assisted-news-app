@@ -7,26 +7,26 @@ import re
 import unicodedata
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Annotated, Any
 
 from bson import ObjectId
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
-from .auth import (
-    AdminAuthenticationError,
-    authorized_admin_username,
-    create_admin_token,
-    password_matches,
-)
 from .config import NewsDatabaseConfigurationError, get_news_settings
 from .database import NewsDatabaseError, get_news_client
-from .identity import admin_author_id, admin_external_id
+from .firebase_auth import (
+    FirebaseAuthenticationError,
+    FirebaseConfigurationError,
+    FirebaseIdentity,
+    verify_firebase_bearer,
+)
 from .models import (
     AuditAction,
+    InteractionType,
     ImageType,
     LocationLevel,
     NewsStatus,
@@ -44,9 +44,10 @@ from .models.news import (
     Verification,
 )
 from .models.reading_time import compute_reading_time
-from .models.user import Onboarding, User
-from .secret_loader import SecretFileError, load_secret
-from .topics import TOPICS
+from .interactions import record_interaction
+from .personalization import compose_feed, rank_news
+from .topics import TOPICS, normalize_topic
+from .user_accounts import UserAccountError, ensure_news_user
 
 CATEGORY_IDS = set(TOPICS)
 DEFAULT_ALLOWED_ORIGINS = (
@@ -98,6 +99,7 @@ class NewsArticleResponse(BaseModel):
     verification: VerificationResponse | None = None
     sources: list[Source] = Field(default_factory=list)
     aiAssistance: AiAssistance = Field(default_factory=AiAssistance)
+    feedReason: str | None = None
 
 
 class HealthResponse(BaseModel):
@@ -115,21 +117,66 @@ class LocationResponse(BaseModel):
     level: str
 
 
-class AdminLoginRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=120)
-    password: str = Field(min_length=1, max_length=500)
+class AuthenticatedUserResponse(BaseModel):
+    id: str
+    firebaseUid: str
+    email: str
+    displayName: str
+    photoUrl: str
+    role: UserRole
 
-    @field_validator("username", "password")
+
+class InferredInterestResponse(BaseModel):
+    topic: str
+    score: float
+    updatedAt: datetime
+
+
+class UserProfileResponse(BaseModel):
+    locationId: str
+    locationName: str
+    selectedTopics: list[str]
+    inferredInterests: list[InferredInterestResponse]
+    onboardingCompleted: bool
+
+
+class UserProfileUpdateRequest(BaseModel):
+    locationId: str = Field(min_length=24, max_length=24)
+    selectedTopics: list[str] = Field(default_factory=list, max_length=len(TOPICS))
+
+    @field_validator("locationId", mode="before")
     @classmethod
-    def strip_value(cls, value: str) -> str:
-        return value.strip()
+    def normalize_location_id(cls, value):
+        return str(value).strip()
+
+    @field_validator("selectedTopics", mode="before")
+    @classmethod
+    def normalize_selected_topics(cls, value):
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("selectedTopics debe ser una lista.")
+        normalized = []
+        for topic in value:
+            canonical = normalize_topic(topic)
+            if canonical not in normalized:
+                normalized.append(canonical)
+        return normalized
 
 
-class AdminLoginResponse(BaseModel):
-    accessToken: str
-    tokenType: str = "Bearer"
-    expiresIn: int
-    username: str
+class InteractionRequest(BaseModel):
+    feedPosition: int | None = Field(default=None, ge=0)
+    dwellTimeSeconds: int | None = Field(default=None, ge=0)
+
+
+class InteractionResponse(BaseModel):
+    id: str
+    type: InteractionType
+    createdAt: datetime
+    dwellTimeSeconds: int | None
+    simulatedLocationId: str
+    feedPosition: int | None
+    recordedNow: bool
 
 
 class AdminNewsCreateRequest(BaseModel):
@@ -317,69 +364,74 @@ def _parse_object_id(value: str, field_name: str) -> ObjectId:
     return ObjectId(value)
 
 
-def _load_admin_password(settings) -> str:
+def _authenticated_firebase_identity(
+    request: Request, authorization: str | None
+) -> FirebaseIdentity:
     try:
-        return load_secret(settings.admin_password_file)
-    except SecretFileError as error:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "La autenticación admin no está configurada. "
-                "Crea keys/news_admin_password con la contraseña admin."
-            ),
-        ) from error
+        return verify_firebase_bearer(
+            authorization,
+            request.app.state.news_settings.firebase_project_id,
+        )
+    except FirebaseAuthenticationError as error:
+        raise HTTPException(status_code=401, detail="Firebase ID token inválido o vencido.") from error
+    except FirebaseConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
-def _authorized_admin_username(request: Request) -> str:
+def get_authenticated_user(
+    request: Request, authorization: str | None = Header(default=None)
+) -> dict[str, Any]:
+    identity = _authenticated_firebase_identity(request, authorization)
+    settings = request.app.state.news_settings
+    database = request.app.state.news_client[settings.mongodb_database]
     try:
-        return authorized_admin_username(
-            request.headers.get("Authorization", ""), request.app.state.news_settings
+        return ensure_news_user(
+            database,
+            identity,
+            default_location_code=os.getenv("NEWS_CHAT_DEFAULT_LOCATION_CODE", "GT"),
         )
-    except AdminAuthenticationError as error:
+    except UserAccountError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except PyMongoError as error:
         raise HTTPException(
-            status_code=401, detail="Token admin inválido o requerido."
-        ) from error
-    except SecretFileError as error:
-        raise HTTPException(
-            status_code=503, detail="La autenticación admin no está configurada."
+            status_code=503, detail="No fue posible resolver tu usuario en MongoDB."
         ) from error
 
 
-def _stable_admin_author_id(username: str) -> ObjectId:
-    return admin_author_id(username)
+AuthenticatedUser = Annotated[dict[str, Any], Depends(get_authenticated_user)]
 
 
-def _ensure_admin_author(database, username: str, location_id: ObjectId) -> ObjectId:
-    now = datetime.now(timezone.utc)
-    author_id = _stable_admin_author_id(username)
-    existing = database["users"].find_one({"firebaseUid": admin_external_id(username)})
-    if existing:
-        database["users"].update_one(
-            {"_id": existing["_id"]}, {"$set": {"updatedAt": now, "lastLoginAt": now}}
-        )
-        return existing["_id"]
-    created_at = now
-    user = User(
-        _id=author_id,
-        firebaseUid=admin_external_id(username),
-        email=f"{username}@local.admin",
-        displayName="Admin local",
-        photoUrl="",
-        role=UserRole.admin,
-        simulatedLocationId=location_id,
-        onboarding=Onboarding(
-            completed=True, completedAt=created_at, selectedTopics=[]
-        ),
-        createdAt=created_at,
-        updatedAt=now,
-        lastLoginAt=now,
+def get_optional_authenticated_user(
+    request: Request, authorization: str | None = Header(default=None)
+) -> dict[str, Any] | None:
+    """Keep public reading available while personalizing verified sessions."""
+    if not authorization:
+        return None
+    return get_authenticated_user(request, authorization)
+
+
+OptionalAuthenticatedUser = Annotated[
+    dict[str, Any] | None, Depends(get_optional_authenticated_user)
+]
+
+
+def _user_profile_response(database, user: dict[str, Any]) -> UserProfileResponse:
+    location = database["locations"].find_one(
+        {"_id": user["simulatedLocationId"], "active": True},
+        {"name": 1},
     )
-    database["users"].replace_one(
-        {"_id": author_id},
-        user.model_dump_mongo(),
-        upsert=True,
+    if not location:
+        raise HTTPException(status_code=409, detail="Tu ubicación ya no está disponible.")
+    return UserProfileResponse(
+        locationId=str(user["simulatedLocationId"]),
+        locationName=str(location["name"]),
+        selectedTopics=(user.get("onboarding") or {}).get("selectedTopics") or [],
+        inferredInterests=[
+            InferredInterestResponse.model_validate(item)
+            for item in user.get("inferredInterests") or []
+        ],
+        onboardingCompleted=bool((user.get("onboarding") or {}).get("completed")),
     )
-    return author_id
 
 
 def _source_from_request(
@@ -422,7 +474,7 @@ def _image_from_request(payload: AdminNewsCreateRequest) -> Image:
 def _create_news_document(
     database,
     payload: AdminNewsCreateRequest,
-    admin_username: str,
+    actor: dict[str, Any],
 ) -> dict[str, Any]:
     location_id = _parse_object_id(payload.locationId, "locationId")
     location = database["locations"].find_one(
@@ -435,7 +487,7 @@ def _create_news_document(
         )
 
     now = datetime.now(timezone.utc)
-    author_id = _ensure_admin_author(database, admin_username, location_id)
+    author_id = actor["_id"]
     content = payload.content.strip()
     word_count, reading_minutes = compute_reading_time(content)
     published_at = now if payload.status == NewsStatus.published else None
@@ -471,7 +523,7 @@ def _create_news_document(
             status=payload.verificationStatus,
             reviewedBy=author_id,
             reviewedAt=now,
-            notes="Creada manualmente desde el panel admin local.",
+            notes="Creada desde el panel administrativo autenticado con Firebase.",
         ),
         sources=_source_from_request(payload, now),
         image=_image_from_request(payload),
@@ -524,7 +576,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=_allowed_origins(),
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "PATCH", "POST"],
         allow_headers=["Content-Type", "Authorization"],
     )
 
@@ -546,17 +598,21 @@ def create_app() -> FastAPI:
         )
 
     @application.get("/news", response_model=list[NewsArticleResponse])
-    async def news_feed(request: Request) -> list[NewsArticleResponse]:
+    async def news_feed(
+        request: Request, user: OptionalAuthenticatedUser
+    ) -> list[NewsArticleResponse]:
         settings = request.app.state.news_settings
         database = request.app.state.news_client[settings.mongodb_database]
         try:
-            cursor = (
-                database["news"]
-                .find({"status": "published"})
-                .sort("publishedAt", -1)
-                .limit(50)
-            )
-            return [document_to_article(database, document) for document in cursor]
+            documents = list(database["news"].find({"status": "published"}))
+            ranked = rank_news(documents, user)
+            composed = compose_feed(ranked, user, limit=50)
+            return [
+                document_to_article(database, item["document"]).model_copy(
+                    update={"feedReason": item["reason"]}
+                )
+                for item in composed
+            ]
         except PyMongoError as error:
             raise HTTPException(
                 status_code=503,
@@ -595,27 +651,118 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Noticia no encontrada.")
         return document_to_article(database, document)
 
-    @application.post("/admin/login", response_model=AdminLoginResponse)
-    async def admin_login(
-        payload: AdminLoginRequest, request: Request
-    ) -> AdminLoginResponse:
-        settings = request.app.state.news_settings
-        expected_password = _load_admin_password(settings)
-        if payload.username != settings.admin_username or not password_matches(
-            payload.password,
-            expected_password,
-        ):
-            raise HTTPException(status_code=401, detail="Credenciales admin inválidas.")
-
-        token = create_admin_token(
-            payload.username,
-            expected_password,
-            settings.admin_token_ttl_seconds,
+    @application.get("/auth/me", response_model=AuthenticatedUserResponse)
+    async def current_user(user: AuthenticatedUser):
+        return AuthenticatedUserResponse(
+            id=str(user["_id"]),
+            firebaseUid=user["firebaseUid"],
+            email=user["email"],
+            displayName=user["displayName"],
+            photoUrl=user["photoUrl"],
+            role=user["role"],
         )
-        return AdminLoginResponse(
-            accessToken=token,
-            expiresIn=settings.admin_token_ttl_seconds,
-            username=payload.username,
+
+    @application.get("/profile", response_model=UserProfileResponse)
+    async def user_profile(request: Request, user: AuthenticatedUser):
+        settings = request.app.state.news_settings
+        database = request.app.state.news_client[settings.mongodb_database]
+        try:
+            return _user_profile_response(database, user)
+        except PyMongoError as error:
+            raise HTTPException(
+                status_code=503, detail="No fue posible leer tu perfil."
+            ) from error
+
+    @application.patch("/profile", response_model=UserProfileResponse)
+    async def update_user_profile(
+        payload: UserProfileUpdateRequest,
+        request: Request,
+        user: AuthenticatedUser,
+    ):
+        settings = request.app.state.news_settings
+        database = request.app.state.news_client[settings.mongodb_database]
+        location_id = _parse_object_id(payload.locationId, "locationId")
+        now = datetime.now(timezone.utc)
+        onboarding = user.get("onboarding") or {}
+        completed_at = onboarding.get("completedAt") or now
+        try:
+            location = database["locations"].find_one(
+                {"_id": location_id, "active": True}, {"_id": 1}
+            )
+            if not location:
+                raise HTTPException(
+                    status_code=400, detail="La ubicación seleccionada no existe."
+                )
+            database["users"].update_one(
+                {"_id": user["_id"]},
+                {
+                    "$set": {
+                        "simulatedLocationId": location_id,
+                        "onboarding.selectedTopics": payload.selectedTopics,
+                        "onboarding.completed": True,
+                        "onboarding.completedAt": completed_at,
+                        "updatedAt": now,
+                    }
+                },
+            )
+            updated_user = {
+                **user,
+                "simulatedLocationId": location_id,
+                "onboarding": {
+                    **onboarding,
+                    "selectedTopics": payload.selectedTopics,
+                    "completed": True,
+                    "completedAt": completed_at,
+                },
+                "updatedAt": now,
+            }
+            return _user_profile_response(database, updated_user)
+        except PyMongoError as error:
+            raise HTTPException(
+                status_code=503, detail="No fue posible guardar tus preferencias."
+            ) from error
+
+    @application.post(
+        "/news/{slug}/interactions/{interaction_type}",
+        response_model=InteractionResponse,
+    )
+    async def news_interaction(
+        slug: str,
+        interaction_type: str,
+        payload: InteractionRequest,
+        request: Request,
+        user: AuthenticatedUser,
+    ):
+        if interaction_type not in {InteractionType.opened.value, InteractionType.read.value}:
+            raise HTTPException(status_code=404, detail="Tipo de interacción no disponible.")
+        settings = request.app.state.news_settings
+        database = request.app.state.news_client[settings.mongodb_database]
+        try:
+            news = database["news"].find_one({"slug": slug, "status": "published"})
+            if not news:
+                raise HTTPException(status_code=404, detail="Noticia no encontrada.")
+            interaction, created = record_interaction(
+                database,
+                user,
+                news,
+                interaction_type,
+                feed_position=payload.feedPosition,
+                dwell_time_seconds=payload.dwellTimeSeconds,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except PyMongoError as error:
+            raise HTTPException(
+                status_code=503, detail="No fue posible registrar la lectura."
+            ) from error
+        return InteractionResponse(
+            id=str(interaction["_id"]),
+            type=interaction["type"],
+            createdAt=interaction["createdAt"],
+            dwellTimeSeconds=interaction.get("dwellTimeSeconds"),
+            simulatedLocationId=str(interaction["context"]["simulatedLocationId"]),
+            feedPosition=interaction["context"].get("feedPosition"),
+            recordedNow=created,
         )
 
     @application.post(
@@ -624,12 +771,14 @@ def create_app() -> FastAPI:
     async def admin_create_news(
         payload: AdminNewsCreateRequest,
         request: Request,
+        user: AuthenticatedUser,
     ) -> NewsArticleResponse:
-        admin_username = _authorized_admin_username(request)
+        if user.get("role") != UserRole.admin and user.get("role") != UserRole.admin.value:
+            raise HTTPException(status_code=403, detail="Se requiere rol administrador.")
         settings = request.app.state.news_settings
         database = request.app.state.news_client[settings.mongodb_database]
         try:
-            document = _create_news_document(database, payload, admin_username)
+            document = _create_news_document(database, payload, user)
         except HTTPException:
             raise
         except ValueError as error:

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from bson import ObjectId
 from fastapi.testclient import TestClient
+from news.firebase_auth import FirebaseAuthenticationError, FirebaseIdentity
 from news.seed_catalog import catalog_location_document
 
 from assistant.app import create_app
@@ -11,17 +12,24 @@ from assistant.config import get_settings
 from assistant.providers.openai import OpenAIChatProvider
 from assistant.tests.news_fakes import FakeClient, FakeDatabase
 
-USER = {"id": "guest:test-1", "displayName": "Invitado"}
+AUTH_HEADERS = {"Authorization": "Bearer firebase-test-token"}
 
 
 def news_client(monkeypatch, database: FakeDatabase, provider: str = "stub") -> TestClient:
     monkeypatch.setenv("MONGODB_CONTEXT_MODE", "news")
     monkeypatch.setenv("CHATBOT_PROVIDER", provider)
     monkeypatch.setenv("MONGODB_REQUIRED", "true")
+    monkeypatch.setenv("NEWS_FIREBASE_PROJECT_ID", "test-firebase-project")
     get_settings.cache_clear()
     monkeypatch.setattr(
         "assistant.app.open_news_client", lambda: (FakeClient(database), "ai_assisted_news")
     )
+    def verify_token(authorization, project_id):
+        if authorization != AUTH_HEADERS["Authorization"] or project_id != "test-firebase-project":
+            raise FirebaseAuthenticationError("invalid test token")
+        return FirebaseIdentity("firebase-test-user", "reader@example.test", "Reader")
+
+    monkeypatch.setattr("assistant.app.verify_firebase_bearer", verify_token)
     return TestClient(create_app())
 
 
@@ -33,7 +41,9 @@ def test_news_mode_answers_with_news_contract(monkeypatch) -> None:
 
     with news_client(monkeypatch, database) as client:
         health = client.get("/health")
-        response = client.post("/chat", json={"message": "últimas noticias", "user": USER})
+        response = client.post(
+            "/chat", json={"message": "últimas noticias"}, headers=AUTH_HEADERS
+        )
 
     assert health.json()["mongodb_connected"] is True
     assert response.status_code == 200
@@ -47,7 +57,9 @@ def test_news_mode_answers_with_news_contract(monkeypatch) -> None:
 
 def test_news_mode_maps_request_errors(monkeypatch) -> None:
     with news_client(monkeypatch, FakeDatabase()) as client:
-        response = client.post("/chat", json={"message": "noticias", "user": USER})
+        response = client.post(
+            "/chat", json={"message": "noticias"}, headers=AUTH_HEADERS
+        )
 
     assert response.status_code == 503
     assert "db-seed-catalog" in response.json()["detail"]
@@ -55,7 +67,7 @@ def test_news_mode_maps_request_errors(monkeypatch) -> None:
 
 def test_news_mode_validates_payload(monkeypatch) -> None:
     with news_client(monkeypatch, FakeDatabase()) as client:
-        response = client.post("/chat", json={"message": "", "user": {"id": "x"}})
+        response = client.post("/chat", json={"message": ""}, headers=AUTH_HEADERS)
 
     assert response.status_code == 422
 
@@ -71,7 +83,9 @@ def test_news_mode_reports_missing_api_key(monkeypatch) -> None:
 
     with news_client(monkeypatch, database, provider="openai") as client:
         # Sin noticias no se necesita la IA: responde igual.
-        empty = client.post("/chat", json={"message": "resume las noticias", "user": USER})
+        empty = client.post(
+            "/chat", json={"message": "resume las noticias"}, headers=AUTH_HEADERS
+        )
         database["news"].documents.append(
             {
                 "_id": ObjectId(),
@@ -83,7 +97,9 @@ def test_news_mode_reports_missing_api_key(monkeypatch) -> None:
                 "sources": [],
             }
         )
-        response = client.post("/chat", json={"message": "resume las noticias", "user": USER})
+        response = client.post(
+            "/chat", json={"message": "resume las noticias"}, headers=AUTH_HEADERS
+        )
 
     assert empty.status_code == 200
     assert response.status_code == 503
@@ -112,7 +128,7 @@ async def test_openai_provider_sends_history_without_storing() -> None:
         message="Pregunta",
         previous_response_id="resp_old",
         context={"noticias": []},
-        user_id="guest:1",
+        user_id="firebase-user-1",
         history=[{"role": "user", "content": "Hola"}, {"role": "assistant", "content": "Hola!"}],
     )
 
@@ -123,40 +139,26 @@ async def test_openai_provider_sends_history_without_storing() -> None:
     assert (result.input_tokens, result.output_tokens) == (12, 3)
 
 
-def test_admin_chat_requires_the_same_token_as_news_api(monkeypatch, tmp_path):
-    from dataclasses import replace
-
-    from news.auth import create_admin_token
-    from news.config import get_news_settings
-    from news.identity import admin_author_id
-
-    # Fixture de contraseña temporal: nunca se monta ni se lee keys/.
-    password_file = tmp_path / "admin_fixture"
-    password_file.write_text("fixture-only-password", encoding="utf-8")
-    admin_settings = replace(
-        get_news_settings(), admin_username="admin", admin_password_file=password_file
-    )
-    monkeypatch.setattr("assistant.app.get_news_settings", lambda: admin_settings)
+def test_chat_uses_verified_firebase_uid_and_rejects_client_identity(monkeypatch):
     database = FakeDatabase()
     database["locations"].documents.append(
         catalog_location_document({"code": "GT", "name": "Guatemala", "country": "Guatemala"})
     )
-    payload = {"message": "noticias", "user": {"id": "admin:admin", "displayName": "Admin"}}
-    token = create_admin_token("admin", "fixture-only-password", 3600)
+    payload = {"message": "noticias", "user": {"id": "admin:admin", "role": "admin"}}
     with news_client(monkeypatch, database) as client:
-        assert client.post("/chat", json=payload).status_code == 401
-        assert database["users"].documents == []
-        assert (
-            client.post(
-                "/chat", json=payload, headers={"Authorization": "Bearer invalid"}
-            ).status_code
-            == 401
+        assert client.post("/chat", json={"message": "noticias"}).status_code == 401
+        assert client.post(
+            "/chat",
+            json={"message": "noticias"},
+            headers={"Authorization": "Bearer invalid"},
+        ).status_code == 401
+        assert client.post("/chat", json=payload, headers=AUTH_HEADERS).status_code == 422
+        response = client.post(
+            "/chat", json={"message": "noticias"}, headers=AUTH_HEADERS
         )
-        response = client.post("/chat", json=payload, headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
-    assert database["users"].documents[0]["firebaseUid"] == "local-admin:admin"
-    assert database["users"].documents[0]["_id"] == admin_author_id("admin")
-    assert database["users"].documents[0]["role"] == "admin"
+    assert database["users"].documents[0]["firebaseUid"] == "firebase-test-user"
+    assert database["users"].documents[0]["role"] == "user"
 
 
 def test_news_entrypoint_loads_root_env_and_selects_news_without_changing_legacy_default(

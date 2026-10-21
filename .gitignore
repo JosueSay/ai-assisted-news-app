@@ -124,3 +124,9 @@ app.*.symbols
 .env
 .env.*
 !.env.example
+
+# Estado local y credenciales efímeras de herramientas de despliegue.
+.firebase/
+.firebaserc
+firebase-debug*.log
+gha-creds-*.json

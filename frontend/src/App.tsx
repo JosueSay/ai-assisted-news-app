@@ -30,11 +30,11 @@ export default function App() {
     user,
     isLoading,
     error,
+    isFirebaseConfigured,
     isGoogleConfigured,
     canPromptGoogle,
     signInWithGoogle,
     signInAsGuest,
-    signInAsAdmin,
     signOut,
   } = useGoogleAuth();
 
@@ -58,11 +58,11 @@ export default function App() {
         <LoginScreen
           isLoading={isLoading}
           error={error}
+          isFirebaseConfigured={isFirebaseConfigured}
           isGoogleConfigured={isGoogleConfigured}
           canPromptGoogle={canPromptGoogle}
           onSignInWithGoogle={() => void signInWithGoogle()}
           onSignInAsGuest={() => void signInAsGuest()}
-          onSignInAsAdmin={(username, password) => signInAsAdmin(username, password)}
         />
       )}
     </SafeAreaProvider>

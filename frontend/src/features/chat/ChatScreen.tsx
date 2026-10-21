@@ -13,14 +13,20 @@ import {
 import { Bot, Clock3, MapPin, MessageCircle, Plus, Send, X } from "lucide-react-native";
 
 import {
-  chatExternalUserId,
   isSessionActive,
   sendChatMessage,
   type ChatAssistantMessage,
   type ChatConfidence,
   type ChatStrategy,
 } from "../../services/chatService";
-import { fetchLocations, type NewsLocation } from "../../services/newsService";
+import {
+  fetchLocations,
+  fetchNewsProfile,
+  updateNewsProfile,
+  type NewsLocation,
+  type NewsProfile,
+} from "../../services/newsService";
+import { getCurrentFirebaseIdToken } from "../../services/firebaseClient";
 import { colors, fonts, layout, radii, spacing } from "../../theme";
 import type { AppUser, NewsArticle } from "../../types";
 import {
@@ -38,9 +44,8 @@ type Props = {
   contextArticle: NewsArticle | null;
   onClearContext: () => void;
   onOpenArticle: (slug: string) => void;
+  onProfileChanged: (profile: NewsProfile) => void;
 };
-
-const LOCATION_STORAGE_KEY = "ai-news:chat-location";
 
 type ActiveConversation = Omit<ChatConversation, "sessionId" | "expiresAt"> & {
   sessionId: string | null;
@@ -84,8 +89,14 @@ function nextEntryId() {
   return `${Date.now()}-${entryCounter}`;
 }
 
-export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle }: Props) {
-  const userKey = chatExternalUserId(user);
+export function ChatScreen({
+  user,
+  contextArticle,
+  onClearContext,
+  onOpenArticle,
+  onProfileChanged,
+}: Props) {
+  const userKey = user.id;
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
@@ -98,6 +109,8 @@ export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle
   const [locations, setLocations] = useState<NewsLocation[]>([]);
   const [locationId, setLocationId] = useState<string | null>(null);
   const [locationsError, setLocationsError] = useState<string | null>(null);
+  const [isSavingLocation, setIsSavingLocation] = useState(false);
+  const [newsProfile, setNewsProfile] = useState<NewsProfile | null>(null);
   const messageScroll = useRef<ScrollView>(null);
   const lastContextArticleId = useRef<string | null>(null);
   const sending = useRef(false);
@@ -125,17 +138,18 @@ export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle
       .catch(() => {
         if (active) setIsHistoryLoaded(true);
       });
-    AsyncStorage.getItem(LOCATION_STORAGE_KEY)
-      .then((stored) => {
-        if (active && stored) setLocationId(stored);
-      })
-      .catch(() => undefined);
-    fetchLocations()
-      .then((items) => {
-        if (active) setLocations(items);
+    void Promise.all([
+      fetchLocations(),
+      getCurrentFirebaseIdToken().then(fetchNewsProfile),
+    ])
+      .then(([items, profile]) => {
+        if (!active) return;
+        setLocations(items);
+        setNewsProfile(profile);
+        setLocationId(profile.locationId);
       })
       .catch(() => {
-        if (active) setLocationsError("No pudimos cargar las ubicaciones.");
+        if (active) setLocationsError("No pudimos cargar tu ubicación y preferencias.");
       });
     return () => {
       active = false;
@@ -157,10 +171,26 @@ export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle
     [conversations],
   );
 
-  const selectLocation = useCallback((nextLocationId: string) => {
-    setLocationId(nextLocationId);
-    AsyncStorage.setItem(LOCATION_STORAGE_KEY, nextLocationId).catch(() => undefined);
-  }, []);
+  const selectLocation = useCallback(async (nextLocationId: string) => {
+    if (!newsProfile || nextLocationId === locationId || isSavingLocation) return;
+    setIsSavingLocation(true);
+    setLocationsError(null);
+    try {
+      const token = await getCurrentFirebaseIdToken();
+      const updated = await updateNewsProfile(
+        token,
+        nextLocationId,
+        newsProfile.selectedTopics,
+      );
+      setNewsProfile(updated);
+      setLocationId(updated.locationId);
+      onProfileChanged(updated);
+    } catch {
+      setLocationsError("No pudimos guardar la ubicación. Intenta de nuevo.");
+    } finally {
+      setIsSavingLocation(false);
+    }
+  }, [isSavingLocation, locationId, newsProfile, onProfileChanged]);
 
   const startNewConversation = useCallback(() => {
     setActiveConversation({
@@ -182,7 +212,7 @@ export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle
       const message = text.trim();
       if (!isHistoryLoaded || !message || sending.current) return;
 
-      const target = conversationOverride ?? activeConversation ?? {
+      const target: ActiveConversation = conversationOverride ?? activeConversation ?? {
         id: `draft-${nextEntryId()}`,
         userKey,
         sessionId: null,
@@ -203,7 +233,6 @@ export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle
       try {
         const reply = await sendChatMessage({
           message,
-          user,
           sessionId: activeSession,
           newsId: baseEntries.length === 0 ? target.contextArticleId ?? null : null,
           locationId,
@@ -374,7 +403,8 @@ export function ChatScreen({ user, contextArticle, onClearContext, onOpenArticle
                   key={location.id}
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
-                  onPress={() => selectLocation(location.id)}
+                  disabled={isSavingLocation || !newsProfile}
+                  onPress={() => void selectLocation(location.id)}
                   style={({ pressed }) => [
                     styles.chip,
                     selected ? styles.chipSelected : null,

@@ -24,3 +24,5 @@ yarn-error.*
 **/.env.*
 !**/.env.example
 graphify-out/
+.firebase/
+gha-creds-*.json

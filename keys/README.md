@@ -15,10 +15,7 @@ ejecutar el proyecto en entorno local.
 | Archivo | Propósito | ¿Debe crearlo el desarrollador? |
 | --- | --- | --- |
 | `mongodb_uri` | URI de conexión a MongoDB Atlas para la aplicación de noticias. | Sí |
-| `news_admin_password` | Contraseña local del usuario admin para crear noticias manualmente. | Sí |
 | `openai_api_key` | API key de OpenAI del chatbot de noticias (`backend/assistant` en modo news). Solo se usa con `CHATBOT_PROVIDER=openai`. | Sí (puede quedar vacío con `CHATBOT_PROVIDER=stub`) |
-| `client_id` | Identificador de cliente para autenticación futura (reservado). | Sí (vacío) |
-| `client_secret` | Secreto de cliente para autenticación futura (reservado). | Sí (vacío) |
 
 ## Preparación automática
 
@@ -27,6 +24,12 @@ make setup-keys
 ```
 
 Crea los archivos faltantes vacíos. No sobrescribe archivos existentes.
+
+Para Cloud Run se usa la misma lista: el operador ejecuta `make gcp-secrets`
+para cargar estos archivos en Secret Manager. Con `CHATBOT_PROVIDER=stub` OpenAI
+es opcional. El despliegue actual con Firebase Auth no requiere contraseña admin
+local ni otro archivo secreto. Consulta la
+[guía de despliegue](../docs/deploy/firebase-paso-a-paso.md).
 
 ## Formato esperado
 
@@ -38,17 +41,6 @@ Contiene únicamente la URI de MongoDB Atlas. Sin comillas, sin saltos de línea
 mongodb+srv://usuario:contraseña@cluster.xxxxx.mongodb.net/
 ```
 
-### `client_id` y `client_secret`
-
-Reservados para autenticación futura. Deben estar presentes aunque vacíos. No son leídos,
-validados ni utilizados por la infraestructura de MongoDB actual.
-
-### `news_admin_password`
-
-Contiene únicamente la contraseña del admin local usado por `POST /admin/login`.
-Debe tener un valor no vacío antes de intentar crear noticias desde el panel admin.
-No colocar esta contraseña en `.env`, `.env.example`, logs ni commits.
-
 ### `openai_api_key`
 
 Contiene únicamente la API key de OpenAI del chatbot (`POST /chat` en el puerto 8010). Con
@@ -59,6 +51,13 @@ Con `CHATBOT_PROVIDER=openai` también deben definirse en `.env`
 `NEWS_CHAT_INPUT_USD_PER_MILLION` y `NEWS_CHAT_OUTPUT_USD_PER_MILLION` (precios del modelo), que
 no son secretos. Cada llamada queda registrada en la colección `aiUsage` y el chat deja de usar IA
 al alcanzar el presupuesto de `NEWS_AI_BUDGET_USD` (20 USD por defecto).
+
+## Firebase Authentication
+
+La autenticación usa Firebase ID tokens; no requiere archivos de cuenta de servicio ni
+secretos OAuth en `keys/`. El `Project ID` del backend va en `.env` como
+`NEWS_FIREBASE_PROJECT_ID`; la configuración pública de cliente y los OAuth Client IDs
+van en `frontend/.env`. No guardes contraseñas, tokens ni claves privadas en esos archivos.
 
 Reemplaza a pasar la key por la variable `API_GPT`: no debe ir en `.env`. El assistant solo usa
 `API_GPT` si está definida explícitamente en el entorno (compatibilidad con su uso anterior).

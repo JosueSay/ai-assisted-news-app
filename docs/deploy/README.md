@@ -1,100 +1,58 @@
-# Deploy en Google Cloud
+# Despliegue de AI News
 
-Estado: v1 (2026-10-19). Despliega `news-api` y el chatbot (`backend/assistant` en modo news) en
-Cloud Run. La base sigue en MongoDB Atlas. La app se prueba en celulares con Expo Go apuntando a las
-URLs de Cloud Run.
+Actualizado: 2026-10-20. El frontend web se publica en Firebase Hosting; Firebase
+Authentication identifica a lectores e invitados. `news-api` y el assistant en
+modo news corren en Cloud Run y comparten únicamente MongoDB Atlas
+`ai_assisted_news`.
 
-## Infraestructura
+La [guía Firebase paso a paso](firebase-paso-a-paso.md) explica desde la creación
+del proyecto hasta la comprobación del feed, la lectura, el chat y el pipeline.
+Para automatizar publicaciones después del primer deploy, sigue la
+[guía del pipeline paso a paso](pipeline-paso-a-paso.md).
 
-```mermaid
-flowchart LR
-    subgraph Celular["Celular (Expo Go)"]
-        APP["App AI News"]
-    end
+## Comandos
 
-    subgraph GH["GitHub"]
-        MAIN["push a main"] --> ACT["Actions<br/>pytest + deploy.sh"]
-    end
+| Comando | Uso |
+| --- | --- |
+| `make gcp-bootstrap` | Preparar APIs, Artifact Registry, IAM, Secret Manager, VPC/NAT y WIF |
+| `make gcp-secrets CHATBOT_PROVIDER=openai` | Cargar manualmente los secretos MongoDB y OpenAI desde `keys/` |
+| `ALLOW_PUBLIC=1 make gcp-deploy CHATBOT_PROVIDER=openai` | Primer deploy de los dos backends, con OpenAI, acceso HTTP público y Auth de aplicación |
+| `make firebase-check-config` | Validar proyecto Firebase y parámetros públicos del frontend |
+| `make firebase-deploy` | Exportar la web y publicar únicamente Hosting |
+| `make deploy-test` | Comprobar comandos cloud/Hosting, preflight CI e IAM simulados, sin red ni secretos |
+| `make news-integration-test` | Probar API, perfil, lecturas y chat sobre MongoDB efímera |
 
-    subgraph GCP["Google Cloud"]
-        AR[("Artifact Registry<br/>ai-news")]
-        SM[("Secret Manager<br/>mongodb-uri, admin, openai")]
-        subgraph RUN["Cloud Run"]
-            API["news-api<br/>:8020"]
-            BOT["news-chatbot<br/>:8010"]
-        end
-        subgraph VPC["VPC ai-news-vpc"]
-            NAT["Cloud NAT<br/>IP fija"]
-        end
-    end
+Configura `PROJECT_ID` y opcionalmente `NEWS_FIREBASE_PROJECT_ID` y `REGION` antes
+de ejecutar los comandos cloud. Se pueden definir en el entorno o en
+`deploy/gcp/config.sh`. CORS permite por defecto los dos dominios Hosting del
+proyecto Firebase; los dominios propios deben agregarse a ambos backends.
+Los comandos cloud no cargan el `.env` raíz de desarrollo. Hosting usa la
+configuración pública del frontend; las tareas locales conservan el `.env` raíz.
+Configura el modelo y sus precios de entrada/salida en el entorno o en
+`deploy/gcp/config.sh` antes de desplegar. En GitHub `production`, define
+`CHATBOT_PROVIDER=openai` y ambos precios explícitamente; el workflow usa `openai`
+por defecto y requiere una región explícita. La guía detalla estos pasos.
 
-    ATLAS[("MongoDB Atlas<br/>ai_assisted_news")]
-    OPENAI["OpenAI API"]
+## Archivos y límites
 
-    ACT -- "WIF, sin llaves JSON" --> AR
-    ACT -- "gcloud run deploy" --> RUN
-    AR --> RUN
-    SM -- "archivos en /secrets" --> RUN
-    APP -- "HTTPS" --> API
-    APP -- "HTTPS" --> BOT
-    API --> NAT
-    BOT --> NAT
-    NAT -- "solo esta IP en la lista de Atlas" --> ATLAS
-    NAT --> OPENAI
-```
+- `deploy/gcp/config.sh`: parámetros públicos, incluidos Firebase, CORS y precios IA.
+- `deploy/gcp/bootstrap.sh`: infraestructura; no inicializa MongoDB ni carga secretos.
+- `deploy/gcp/load-secrets.sh`: carga MongoDB y, cuando corresponde, OpenAI. El
+  operador lo ejecuta personalmente; no se requiere contraseña admin local.
+- `deploy/gcp/deploy.sh`: build, push y deploy de los dos servicios Python.
+- `deploy/firebase/hosting.sh` y `firebase.json`: export y publicación del portal.
+- `deploy/firebase/ci.sh`: resuelve URLs Cloud Run y publica Hosting con las
+  variables públicas del runner y credenciales ADC/WIF.
+- `deploy/gcp/check-ci-config.sh`: valida variables antes de cambios cloud.
+- `.github/workflows/deploy.yml`: tests backend/frontend y publicación de Cloud
+  Run seguida de Hosting desde `main`, con variables GitHub `production`.
 
-## Archivos
+Los secretos cloud se montan como archivos y cada servicio tiene su propia cuenta.
+La salida usa NAT con IP fija para la lista de acceso Atlas. El rol admin proviene
+exclusivamente de `users.role`, vinculado al UID Firebase verificado. Perfil,
+interacciones y chat requieren Firebase ID tokens; feed y detalle públicos siguen
+disponibles. El límite de instancias no reemplaza los controles de presupuesto IA.
 
-| Archivo | Uso |
-|---|---|
-| `deploy/gcp/config.sh` | Parámetros no secretos: proyecto, región, nombres y precios del modelo. |
-| `deploy/gcp/bootstrap.sh` | Crea APIs, Artifact Registry, cuentas de servicio, secretos vacíos, red con IP fija y la federación con GitHub. Idempotente. |
-| `deploy/gcp/load-secrets.sh` | Sube `keys/*` a Secret Manager sin imprimir valores. |
-| `deploy/gcp/deploy.sh` | Build, push y deploy de los dos servicios. |
-| `.github/workflows/deploy.yml` | Pytest en cada PR. Deploy automático en `main`. |
-
-## Seguridad
-
-- Los secretos viven en Secret Manager y se montan como archivos, igual que `keys/` en local.
-- Cada servicio corre con su propia cuenta de servicio y solo lee sus secretos. `news-api` no ve la
-  key de OpenAI.
-- La salida a internet pasa por Cloud NAT con IP fija. Atlas permite solo esa IP.
-- GitHub se autentica con Workload Identity Federation, limitado al repo y a la rama `main`.
-- La cuenta del pipeline tiene `run.developer`, no `run.admin`: no puede cambiar quién invoca los
-  servicios.
-- `.dockerignore` excluye `keys/` y cualquier `.env`.
-- `MAX_INSTANCES=2` acota el costo. El chat no tiene autenticación todavía: cualquiera con la URL
-  puede consumir el presupuesto de IA hasta USD 20. Se cierra cuando exista Firebase Auth.
-
-## Primer deploy
-
-Requisitos: `gcloud`, Docker y una cuenta con rol Owner en el proyecto.
-
-1. Crear el proyecto en <https://console.cloud.google.com/projectcreate> y vincular la facturación.
-2. Instalar `gcloud`. En NixOS: `nix shell nixpkgs#google-cloud-sdk`.
-3. Iniciar sesión: `gcloud auth login`.
-4. Editar `deploy/gcp/config.sh`: `PROJECT_ID`, `REGION` y los precios `NEWS_CHAT_*`.
-5. `make gcp-bootstrap`. Al final imprime la IP fija y los valores para el workflow.
-6. En Atlas, Network Access: agregar `<IP>/32`.
-7. `make gcp-secrets`.
-8. `ALLOW_PUBLIC=1 make gcp-deploy`. Imprime las dos URLs.
-9. En `.github/workflows/deploy.yml`, reemplazar `WIF_PROVIDER` y `DEPLOYER_SA`.
-
-Desde ahí cada merge a `main` despliega solo.
-
-## Probar en celulares
-
-En `frontend/.env` (Expo lo lee al iniciar `npx expo start` fuera de Docker):
-
-```dotenv
-EXPO_PUBLIC_NEWS_API_BASE_URL=https://news-api-xxxx.run.app
-EXPO_PUBLIC_ASSISTANT_API_BASE_URL=https://news-chatbot-xxxx.run.app
-```
-
-Después `cd frontend && npx expo start --tunnel` y escanear el QR con Expo Go. Con `--tunnel` los
-celulares no necesitan estar en la misma red.
-
-## Cambiar un secreto
-
-Editar el archivo en `keys/`, correr `make gcp-secrets` y volver a desplegar (`make gcp-deploy` o un
-merge a `main`). Cloud Run toma la versión `latest` en cada revisión nueva.
+El despliegue web no genera un build Android/iOS. Abre el portal publicado en el
+navegador del teléfono; Google Sign-In nativo requiere un build propio y configuración
+OAuth adicional. Consulta la [guía del frontend](../../frontend/README.md).

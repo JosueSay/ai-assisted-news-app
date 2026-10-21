@@ -88,16 +88,21 @@ el esquema aprobado y los seeders no se modifican.
 
 ## Identidad administrativa
 
-La identidad canónica continúa siendo `local-admin:<username>` y su ObjectId
-conserva el algoritmo de `news.api` anterior. Publicación y chat reutilizan ese
-usuario. El chat acepta el identificador de transporte `admin:<username>` solo
-cuando verifica el mismo Bearer emitido por `/admin/login`. No concede privilegios
-por el rol o identificador enviado por el cliente. Se conserva el perfil existente.
+La identidad canónica es el UID de Firebase Authentication, guardado en
+`users.firebaseUid`. La API y el chat verifican el ID token (firma, issuer,
+audience, expiración y Project ID) y resuelven el usuario desde MongoDB. El request
+no puede declarar un UID o rol. `users.role` es la fuente de autorización admin y
+se consulta en cada operación protegida.
 
-No se fusionan ni eliminan usuarios o sesiones antiguos con `admin:<username>`:
-una migración de datos previos requiere revisión humana independiente. Google e
-invitado mantienen identificadores provisionales hasta implementar autenticación
-verificada; este cambio no implementa Firebase.
+Google web usa Firebase popup; Android/iOS intercambian la credencial Google por
+una sesión Firebase. El modo invitado usa Firebase Anonymous Authentication. La
+sesión Firebase se conserva en el cliente y se envía como Bearer a `/auth/me`,
+`/admin/news` y al chat en modo news.
+
+Los registros provisionales (`google:...`, `guest:...`, `local-admin:...`) se
+conservan intactos y no se fusionan automáticamente. Una cuenta admin debe iniciar
+sesión para crear `users.firebaseUid`; una persona autorizada cambia `role` en
+MongoDB. La integración no añade colecciones ni campos.
 
 ## Arranque reproducible
 

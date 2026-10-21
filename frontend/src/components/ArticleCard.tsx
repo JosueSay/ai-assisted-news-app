@@ -52,6 +52,11 @@ export function ArticleCard({
           />
           <View style={styles.content}>
             <Text style={styles.category}>{getCategoryLabel(article.category)}</Text>
+            {article.feedReason ? (
+              <Text accessibilityLabel={`Motivo de selección: ${article.feedReason}`} style={styles.feedReason}>
+                {article.feedReason}
+              </Text>
+            ) : null}
             <Text style={titleStyle}>{article.title}</Text>
             {!isCompact ? <Text style={styles.summary}>{article.summary}</Text> : null}
             <Text style={styles.meta}>
@@ -125,6 +130,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.72,
     lineHeight: 17,
     textTransform: "uppercase",
+  },
+  feedReason: {
+    color: colors.action,
+    fontFamily: fonts.bodyMedium,
+    fontSize: 12,
+    lineHeight: 17,
   },
   leadTitle: {
     color: colors.ink,

@@ -248,7 +248,8 @@ servicio del asistente, no un backend completo.
 
 El contrato de noticias y sus fuentes canónicas están documentados en
 [contrato compartido](../../docs/architecture/contrato-compartido-noticias.md).
-El chat de un administrador requiere el mismo Bearer de `/admin/login`.
+En modo news, `/chat` requiere un Firebase ID token verificado; su identidad y rol
+se resuelven en `ai_assisted_news.users`. Los modos `projection` y `novu` no cambian.
 
 
 ## Selección del proveedor desde Make

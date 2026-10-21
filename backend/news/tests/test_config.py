@@ -3,8 +3,6 @@
 import os
 
 from news.config import (
-    DEFAULT_ADMIN_TOKEN_TTL_SECONDS,
-    DEFAULT_ADMIN_USERNAME,
     DEFAULT_DATABASE,
     DEFAULT_MODE,
     DEFAULT_REQUIRED,
@@ -20,21 +18,18 @@ class TestGetNewsSettings:
         assert settings.mongodb_database == DEFAULT_DATABASE
         assert settings.mongodb_timeout_ms == DEFAULT_TIMEOUT_MS
         assert settings.mongodb_required is DEFAULT_REQUIRED
-        assert settings.admin_username == DEFAULT_ADMIN_USERNAME
-        assert settings.admin_token_ttl_seconds == DEFAULT_ADMIN_TOKEN_TTL_SECONDS
+        assert settings.firebase_project_id == ""
 
     def test_env_overrides(self) -> None:
         os.environ["NEWS_MONGODB_DATABASE"] = "test_db"
         os.environ["NEWS_MONGODB_TIMEOUT_MS"] = "3000"
         os.environ["NEWS_MONGODB_REQUIRED"] = "false"
-        os.environ["NEWS_ADMIN_USERNAME"] = "editor"
-        os.environ["NEWS_ADMIN_TOKEN_TTL_SECONDS"] = "900"
+        os.environ["NEWS_FIREBASE_PROJECT_ID"] = "test-project"
         settings = get_news_settings()
         assert settings.mongodb_database == "test_db"
         assert settings.mongodb_timeout_ms == 3000
         assert settings.mongodb_required is False
-        assert settings.admin_username == "editor"
-        assert settings.admin_token_ttl_seconds == 900
+        assert settings.firebase_project_id == "test-project"
 
     def test_database_name(self) -> None:
         os.environ["NEWS_MONGODB_DATABASE"] = "custom_news_db"
@@ -59,8 +54,4 @@ def test_root_secret_paths_resolve_identically_in_local_python_and_compose(monke
     from news.config import PROJECT_ROOT, _resolve_path
 
     assert _resolve_path("keys/mongodb_uri") == PROJECT_ROOT / "keys/mongodb_uri"
-    assert (
-        _resolve_path("keys/news_admin_password")
-        == PROJECT_ROOT / "keys/news_admin_password"
-    )
     assert _resolve_path("../../keys/mongodb_uri") == PROJECT_ROOT / "keys/mongodb_uri"

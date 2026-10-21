@@ -25,5 +25,4 @@ openai_required="optional"
 [[ "$CHATBOT_PROVIDER" == "openai" ]] && openai_required="required"
 
 upload "$SECRET_MONGODB_URI" keys/mongodb_uri required
-upload "$SECRET_ADMIN_PASSWORD" keys/news_admin_password required
 upload "$SECRET_OPENAI_API_KEY" keys/openai_api_key "$openai_required"

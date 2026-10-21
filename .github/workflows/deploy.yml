@@ -1,7 +1,7 @@
 name: deploy
 
-# Pruebas en cada PR y en main. El deploy a Cloud Run corre solo en main y solo cuando
-# WIF_PROVIDER y DEPLOYER_SA ya tienen los valores que imprime deploy/gcp/bootstrap.sh.
+# Pruebas en PR/main. Publicación de Cloud Run y Hosting solo desde main,
+# después de todas las pruebas y con las variables de GitHub production.
 on:
   pull_request:
   push:
@@ -32,9 +32,33 @@ jobs:
       - name: Pytest backend
         working-directory: backend
         run: python -m pytest -q assistant/tests news/tests
+      - name: Contrato de scripts de deploy (sin cloud ni secretos)
+        run: make deploy-test
+      - name: Integración feed, perfil y chat (MongoDB efímera)
+        run: make news-integration-test
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Validar cliente y export web (sin publicar)
+        working-directory: frontend
+        env:
+          EXPO_NO_DOTENV: "1"
+          EXPO_NO_TELEMETRY: "1"
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run export:web
 
   deploy:
-    needs: test
+    needs: [test, frontend]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production
@@ -42,28 +66,49 @@ jobs:
       contents: read
       id-token: write
     env:
-      # No son secretos. Los imprime deploy/gcp/bootstrap.sh.
-      WIF_PROVIDER: CAMBIAR
-      DEPLOYER_SA: CAMBIAR
+      # Variables del entorno production en GitHub; ninguna contiene secretos.
+      WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+      DEPLOYER_SA: ${{ vars.DEPLOYER_SA }}
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      NEWS_FIREBASE_PROJECT_ID: ${{ vars.NEWS_FIREBASE_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      CHATBOT_PROVIDER: ${{ vars.CHATBOT_PROVIDER || 'openai' }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
+      NEWS_CHAT_INPUT_USD_PER_MILLION: ${{ vars.NEWS_CHAT_INPUT_USD_PER_MILLION }}
+      NEWS_CHAT_OUTPUT_USD_PER_MILLION: ${{ vars.NEWS_CHAT_OUTPUT_USD_PER_MILLION }}
+      NEWS_API_ALLOWED_ORIGINS: ${{ vars.NEWS_API_ALLOWED_ORIGINS }}
+      CHATBOT_ALLOWED_ORIGINS: ${{ vars.CHATBOT_ALLOWED_ORIGINS }}
+      EXPO_PUBLIC_FIREBASE_API_KEY: ${{ vars.EXPO_PUBLIC_FIREBASE_API_KEY }}
+      EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+      EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
+      EXPO_PUBLIC_FIREBASE_APP_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_APP_ID }}
+      EXPO_NO_DOTENV: "1"
+      EXPO_NO_TELEMETRY: "1"
+      CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
     steps:
-      - id: cfg
-        name: Revisar configuración
-        run: |
-          if [[ "$WIF_PROVIDER" == CAMBIAR* || "$DEPLOYER_SA" == CAMBIAR* ]]; then
-            echo "::warning::Deploy omitido: falta configurar WIF_PROVIDER y DEPLOYER_SA."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
       - uses: actions/checkout@v4
-        if: steps.cfg.outputs.ready == 'true'
+      - name: Revisar configuración de producción
+        run: bash deploy/gcp/check-ci-config.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Preparar frontend y Firebase CLI
+        run: |
+          npm ci --prefix frontend
+          npm install --global firebase-tools@15.34.0
       - uses: google-github-actions/auth@v2
-        if: steps.cfg.outputs.ready == 'true'
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v2
-        if: steps.cfg.outputs.ready == 'true'
-      - name: Build y deploy
-        if: steps.cfg.outputs.ready == 'true'
+      - name: Publicar API y chatbot en Cloud Run
         run: bash deploy/gcp/deploy.sh
+      - name: Renovar credenciales para Hosting
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - name: Publicar frontend en Firebase Hosting
+        run: bash deploy/firebase/ci.sh

@@ -163,10 +163,9 @@ por esta sesión; la DB normal nunca recibió operaciones destructivas.
 
 ```bash
 git clone ...
-make setup-keys        # crea keys/mongodb_uri, keys/news_admin_password,
-                       # keys/client_id, keys/client_secret si faltan (vacíos, sin sobrescribir)
+make setup-keys        # crea keys/mongodb_uri y keys/openai_api_key si faltan
 
-# completar secretos cuando corresponda (modo Atlas: keys/mongodb_uri)
+# completar secretos cuando corresponda (Atlas: mongodb_uri; OpenAI solo si se habilita)
 
 make db-check-config   # sin exponer secretos
 make db-bootstrap      # init + catálogos + demo news + checks
