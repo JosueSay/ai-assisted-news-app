@@ -7,6 +7,8 @@ modo news corren en Cloud Run y comparten únicamente MongoDB Atlas
 
 La [guía Firebase paso a paso](firebase-paso-a-paso.md) explica desde la creación
 del proyecto hasta la comprobación del feed, la lectura, el chat y el pipeline.
+Para automatizar publicaciones después del primer deploy, sigue la
+[guía del pipeline paso a paso](pipeline-paso-a-paso.md).
 
 ## Comandos
 
@@ -17,7 +19,7 @@ del proyecto hasta la comprobación del feed, la lectura, el chat y el pipeline.
 | `ALLOW_PUBLIC=1 make gcp-deploy CHATBOT_PROVIDER=openai` | Primer deploy de los dos backends, con OpenAI, acceso HTTP público y Auth de aplicación |
 | `make firebase-check-config` | Validar proyecto Firebase y parámetros públicos del frontend |
 | `make firebase-deploy` | Exportar la web y publicar únicamente Hosting |
-| `make deploy-test` | Comprobar comandos cloud simulados, sin red ni secretos |
+| `make deploy-test` | Comprobar comandos cloud/Hosting, preflight CI e IAM simulados, sin red ni secretos |
 | `make news-integration-test` | Probar API, perfil, lecturas y chat sobre MongoDB efímera |
 
 Configura `PROJECT_ID` y opcionalmente `NEWS_FIREBASE_PROJECT_ID` y `REGION` antes
@@ -28,8 +30,8 @@ Los comandos cloud no cargan el `.env` raíz de desarrollo. Hosting usa la
 configuración pública del frontend; las tareas locales conservan el `.env` raíz.
 Configura el modelo y sus precios de entrada/salida en el entorno o en
 `deploy/gcp/config.sh` antes de desplegar. En GitHub `production`, define
-`CHATBOT_PROVIDER=openai` y ambos precios explícitamente: el workflow usa `stub`
-si omites el proveedor. La guía detalla estos pasos.
+`CHATBOT_PROVIDER=openai` y ambos precios explícitamente; el workflow usa `openai`
+por defecto y requiere una región explícita. La guía detalla estos pasos.
 
 ## Archivos y límites
 
@@ -39,8 +41,11 @@ si omites el proveedor. La guía detalla estos pasos.
   operador lo ejecuta personalmente; no se requiere contraseña admin local.
 - `deploy/gcp/deploy.sh`: build, push y deploy de los dos servicios Python.
 - `deploy/firebase/hosting.sh` y `firebase.json`: export y publicación del portal.
-- `.github/workflows/deploy.yml`: tests backend/frontend y deploy de Cloud Run
-  desde `main`, con variables del entorno GitHub `production`. Hosting es manual.
+- `deploy/firebase/ci.sh`: resuelve URLs Cloud Run y publica Hosting con las
+  variables públicas del runner y credenciales ADC/WIF.
+- `deploy/gcp/check-ci-config.sh`: valida variables antes de cambios cloud.
+- `.github/workflows/deploy.yml`: tests backend/frontend y publicación de Cloud
+  Run seguida de Hosting desde `main`, con variables GitHub `production`.
 
 Los secretos cloud se montan como archivos y cada servicio tiene su propia cuenta.
 La salida usa NAT con IP fija para la lista de acceso Atlas. El rol admin proviene

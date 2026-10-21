@@ -73,6 +73,13 @@ step "Permisos del pipeline ($DEPLOYER_SA)"
 DEPLOYER="serviceAccount:$(sa_email "$DEPLOYER_SA")"
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member "$DEPLOYER" --role roles/run.developer --condition None >/dev/null
+# Hosting usa la misma identidad WIF y los permisos de CLI documentados por Firebase.
+gcloud services enable firebase.googleapis.com firebasehosting.googleapis.com apikeys.googleapis.com \
+  --project "$NEWS_FIREBASE_PROJECT_ID"
+for role in roles/firebasehosting.admin roles/serviceusage.apiKeysViewer roles/serviceusage.serviceUsageConsumer; do
+  gcloud projects add-iam-policy-binding "$NEWS_FIREBASE_PROJECT_ID" \
+    --member "$DEPLOYER" --role "$role" --condition None >/dev/null
+done
 gcloud artifacts repositories add-iam-policy-binding "$AR_REPO" --location "$REGION" \
   --member "$DEPLOYER" --role roles/artifactregistry.writer >/dev/null
 gcloud compute networks subnets add-iam-policy-binding "$VPC_SUBNET" --region "$REGION" \
@@ -86,13 +93,19 @@ step "Workload Identity Federation para $GITHUB_REPO (solo rama main)"
 exists gcloud iam workload-identity-pools describe "$WIF_POOL" --location global \
   || gcloud iam workload-identity-pools create "$WIF_POOL" \
        --location global --display-name "GitHub Actions"
-exists gcloud iam workload-identity-pools providers describe "$WIF_PROVIDER" \
-    --location global --workload-identity-pool "$WIF_POOL" \
-  || gcloud iam workload-identity-pools providers create-oidc "$WIF_PROVIDER" \
-       --location global --workload-identity-pool "$WIF_POOL" \
-       --issuer-uri "https://token.actions.githubusercontent.com" \
-       --attribute-mapping "google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
-       --attribute-condition "assertion.repository=='${GITHUB_REPO}' && assertion.ref=='refs/heads/main'"
+oidc_args=(
+  --location global --workload-identity-pool "$WIF_POOL"
+  --issuer-uri "https://token.actions.githubusercontent.com"
+  --attribute-mapping "google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref"
+  --attribute-condition "assertion.repository=='${GITHUB_REPO}' && assertion.ref=='refs/heads/main'"
+)
+if exists gcloud iam workload-identity-pools providers describe "$WIF_PROVIDER" \
+    --location global --workload-identity-pool "$WIF_POOL"; then
+  # Reconcilia el propietario/nombre tras una transferencia del repositorio.
+  gcloud iam workload-identity-pools providers update-oidc "$WIF_PROVIDER" "${oidc_args[@]}"
+else
+  gcloud iam workload-identity-pools providers create-oidc "$WIF_PROVIDER" "${oidc_args[@]}"
+fi
 gcloud iam service-accounts add-iam-policy-binding "$(sa_email "$DEPLOYER_SA")" \
   --role roles/iam.workloadIdentityUser \
   --member "principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WIF_POOL}/attribute.repository/${GITHUB_REPO}" \

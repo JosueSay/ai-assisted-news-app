@@ -15,4 +15,4 @@ command -v firebase >/dev/null || {
 }
 # Rebuild transformed modules so a previous export cannot retain empty/old env.
 (cd frontend && NODE_ENV=production npm run export:web -- --clear)
-firebase deploy --only hosting --project "$NEWS_FIREBASE_PROJECT_ID" --config firebase.json
+firebase deploy --only hosting --project "$NEWS_FIREBASE_PROJECT_ID" --config firebase.json --non-interactive

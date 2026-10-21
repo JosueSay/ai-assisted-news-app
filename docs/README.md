@@ -13,5 +13,7 @@ Fuente central para decisiones y contratos que afectan a más de un servicio.
   guía del punto 1, conservada separadamente del alcance general.
 - [Desplegar con Firebase paso a paso](deploy/firebase-paso-a-paso.md): configuración
   de Auth, Cloud Run, Atlas y publicación del portal en Hosting.
+- [Automatizar publicaciones con GitHub](deploy/pipeline-paso-a-paso.md): activar
+  WIF, variables de producción y despliegue de backend y frontend desde `main`.
 
 La documentación específica de un servicio permanece junto al servicio correspondiente.

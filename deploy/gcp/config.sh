@@ -29,7 +29,7 @@ SECRET_MONGODB_URI="${SECRET_MONGODB_URI:-news-mongodb-uri}"
 SECRET_OPENAI_API_KEY="${SECRET_OPENAI_API_KEY:-openai-api-key}"
 
 # GitHub Actions con Workload Identity Federation (sin llaves JSON).
-GITHUB_REPO="${GITHUB_REPO:-JosueSay/ai-assisted-news-app}"
+GITHUB_REPO="${GITHUB_REPO:-ai-project-u1g/ai-assisted-news-app}"
 WIF_POOL="${WIF_POOL:-github}"
 WIF_PROVIDER="${WIF_PROVIDER:-ai-news-repo}"
 

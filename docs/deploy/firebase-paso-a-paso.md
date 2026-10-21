@@ -304,27 +304,19 @@ npm run typecheck
 npm test
 ```
 
-## 12. Activar el pipeline de GitHub, si lo deseas
+## 12. Activar el pipeline automático de GitHub
 
-En **Settings → Environments → production → Environment variables**, crea:
+Sigue la [guía del pipeline paso a paso](pipeline-paso-a-paso.md). El workflow
+publica Cloud Run y Firebase Hosting al llegar cambios a `main`, después de aprobar
+backend, frontend y pruebas de integración. Para activarlo debes repetir el
+bootstrap actualizado y configurar las variables públicas del entorno GitHub
+`production`, incluidos los datos Firebase del frontend y los precios de OpenAI.
 
-| Variable | Valor |
-| --- | --- |
-| `GCP_PROJECT_ID` | ID del proyecto Cloud Run |
-| `WIF_PROVIDER` | Ruta completa que imprime `gcp-bootstrap` |
-| `DEPLOYER_SA` | Correo de la cuenta del pipeline que imprime el bootstrap |
-| `NEWS_FIREBASE_PROJECT_ID` | Opcional si coincide con `GCP_PROJECT_ID` |
-| `GCP_REGION` | Opcional; predeterminado `us-central1` |
-| `CHATBOT_PROVIDER` | Obligatorio: `openai`; si lo omites, el workflow actual usa `stub` |
-| `NEWS_CHAT_INPUT_USD_PER_MILLION` / `NEWS_CHAT_OUTPUT_USD_PER_MILLION` | Obligatorios: precios del modelo configurado, en USD por millón de tokens |
-| `NEWS_API_ALLOWED_ORIGINS` / `CHATBOT_ALLOWED_ORIGINS` | Si agregas un dominio propio |
-
-El workflow valida backend, frontend y scripts antes de desplegar Cloud Run en
-`main`. Hosting se publica con `make firebase-deploy`; todavía no hay publicación
-automática del portal en ese workflow. No subas `keys/` ni claves JSON a GitHub.
-Configura las tres variables de OpenAI antes de habilitar ese despliegue para
-que un merge no cambie el chatbot a `stub`. Mantén `OPENAI_MODEL` en
-`deploy/gcp/config.sh` alineado con los precios del entorno `production`.
+El pipeline obtiene las URLs Cloud Run automáticamente, reconstruye el frontend
+con `--clear` y publica Hosting mediante la misma identidad WIF. Usa
+`CHATBOT_PROVIDER=openai` por defecto. Si falta una variable obligatoria, falla
+antes de cambiar los servicios; no omite silenciosamente la publicación.
+No subas archivos de `keys/`, `.env` locales, claves JSON ni tokens a GitHub.
 
 ## 13. Errores frecuentes
 

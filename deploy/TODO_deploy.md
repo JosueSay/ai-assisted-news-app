@@ -20,8 +20,11 @@ la prueba en el proyecto Firebase real.
 - [ ] Comprobar login, preferencias, lectura, feed y chat en el sitio publicado.
 - [ ] Comprobar un resumen o explicación con IA y su registro en `aiUsage`.
 - [ ] Si se activa CI: configurar las variables del entorno GitHub `production`,
-      incluido `CHATBOT_PROVIDER=openai` y ambos precios.
+      incluidos región, Firebase público, `CHATBOT_PROVIDER=openai` y ambos precios.
+- [ ] Repetir el bootstrap actualizado para los permisos de Hosting y verificar
+      una ejecución completa del pipeline en `main`; seguir la
+      [guía de automatización](../docs/deploy/pipeline-paso-a-paso.md).
 
 No se requiere contraseña admin local ni clave JSON de cuenta de servicio para
-verificar Firebase ID tokens. Hosting se publica por separado del pipeline Cloud
-Run. No se ha ejecutado un deploy real como parte de esta integración.
+verificar Firebase ID tokens. El pipeline ahora publica Cloud Run y Hosting de
+forma secuencial. La preparación local del pipeline no ejecuta una publicación.
