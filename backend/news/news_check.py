@@ -135,6 +135,11 @@ def check_news_data(database: Database) -> NewsCheckResult:
         image_type = (document.get("image") or {}).get("type")
         result.image_types[image_type] = result.image_types.get(image_type, 0) + 1
         image = document.get("image") or {}
+        # The seed intentionally preserves existing news. Detect old placeholders
+        # and attribution drift so a successful local reseed proves image parity.
+        if image != expected["image"]:
+            if slug not in result.coherence_issues:
+                result.coherence_issues.append(slug)
         if image.get("type") in {"ai_generated", "ai_modified"} and not (
             image.get("aiDisclosure") and str(image.get("aiDisclosure")).strip()
         ):

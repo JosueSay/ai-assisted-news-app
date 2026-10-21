@@ -28,6 +28,8 @@ backend/news/
 ├── demo_news.py           # Generador determinista de 32 noticias demo (Loop 05)
 ├── seed_news.py           # Seeder idempotente de noticias demo por slug (Loop 05)
 ├── news_check.py          # Inspección no destructiva del dataset demo (Loop 05)
+├── demo_images.py         # Catálogo versionado de imágenes Commons (Loop 08)
+├── news_images_check.py   # Check HTTP online de las URLs de imagen (Loop 08)
 ├── reseed.py              # Reseed seguro del dataset controlado: ownership, preflight, deletes por _id, confirmación (Loop 06)
 ├── reseed_dry_run.py      # CLI no destructivo del plan de reseed (Loop 06)
 ├── bootstrap.py           # Bootstrap idempotente: init + seeds + checks, sin deletes (Loop 06)
@@ -76,6 +78,7 @@ backend/news/
     ├── test_demo_news.py          # generador determinista de 32 noticias demo
     ├── test_seed_news.py          # seeder idempotente por slug (solo news)
     ├── test_news_check.py         # inspección no destructiva del dataset demo
+    ├── test_news_images_check.py  # check HTTP de imágenes sin red real
     ├── test_reseed.py             # reseed seguro: confirmación, ownership, dry-run, orden, preservación, fallos (Loop 06)
     ├── test_bootstrap.py          # bootstrap idempotente sin deletes (Loop 06)
     ├── test_verify.py             # verificación solo-lectura y sus drifts (Loop 06)
@@ -117,6 +120,13 @@ modifica ni elimina) y se inspecciona sin escribir con `make db-seed-check`. El
  sintético documentado pendiente de correspondencia real) y
  `make db-news-check` inspecciona el dataset sin modificarlo. Detalle en
  `docs/design/database/10-generador-noticias-demo.md`.
+
+ Loop 08 sustituye los placeholders por imágenes reales de Wikimedia Commons
+ con procedencia, crédito y derechos verificados. El catálogo vive en
+ `demo_images.py`; `make db-news-images-check` comprueba por HTTP (HEAD, sin
+ descargar el cuerpo) que las URLs responden con `Content-Type: image/*`. Es
+ online y no usa MongoDB ni secretos. Detalle en
+ `docs/design/database/13-imagenes-demo.md`.
 
 ## Dependencias
 
@@ -206,6 +216,7 @@ make db-seed-check      # Inspecciona el catálogo sin modificar la base
 make db-seed-demo      # Inserta/actualiza datos ficticios para prueba local
 make db-seed-news      # Siembra el dataset demo de 32 noticias (idempotente, solo news)
 make db-news-check      # Inspecciona el dataset demo sin modificar la base
+make db-news-images-check  # Comprueba por HTTP las URLs de imagen (online, sin DB)
 make db-schema-check   # Verifica drift de colecciones, validators e índices
 make db-bootstrap      # Init + catálogos + demo news + checks (idempotente, sin confirmación)
 make db-verify         # Verificación integral solo-lectura (schema + catálogos + demo news)

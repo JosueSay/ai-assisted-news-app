@@ -91,7 +91,9 @@ Detalle en [10 Generador de noticias demo](10-generador-noticias-demo.md).
 
 - 32 noticias sintéticas (DEMO / SYNTHETIC DATA), 2 por país, nivel `country`.
 - 28 `published` / 4 `draft` (MX, ES, JP, ZA); 4 verification statuses; 14 topics cubiertos;
-  5 tipos de imagen; tiempos de lectura coherentes (200 ppm, mínimo 1).
+  imágenes de Wikimedia Commons (9 `photograph`, 10 `illustration`, 4 `ai_generated`, 9 `none`,
+  sin `ai_modified`); tiempos de lectura coherentes (200 ppm, mínimo 1). Detalle en
+  [13 Imágenes del dataset demo](13-imagenes-demo.md).
 - Generador puro y determinista (`demo_news.py`); seeder idempotente por `slug` que solo
   escribe en `news` y nunca crea users.
 - `authorId` es un identificador sintético determinista pendiente de correspondencia con un
@@ -114,10 +116,11 @@ make db-seed-catalogs      siembra 16 locations (idempotente)
 make db-seed-check         inspecciona catálogo (solo lectura)
 make db-seed-news          siembra 32 news demo (idempotente)
 make db-news-check         inspecciona dataset demo (solo lectura)
+make db-news-images-check  comprueba por HTTP las URLs de imagen (online, sin DB)
 make db-bootstrap          init + seeds + checks (idempotente, sin confirmación)
 make db-verify             verificación integral (solo lectura)
 make db-reseed-dry-run     plan real de reseed sin escribir nada
-make db-test               suite offline (204 tests)
+make db-test               suite offline (249 tests)
 ```
 
 No existen `db-reset`, `db-drop`, `db-clean` ni equivalentes.

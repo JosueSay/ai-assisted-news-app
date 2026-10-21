@@ -80,6 +80,9 @@ Reglas:
 - Una imagen con `type` `ai_generated` o `ai_modified` no puede presentarse como fotografía real.
 - Cuando `type` vale `none`, `url` y `alt` valen `null`.
 - `credit` y `rights` registran autoría y condiciones de uso cuando existen.
+- En el dataset demo, `credit` incluye la página del archivo y `rights` la licencia con su URL;
+  el `alt` declara que la imagen es ilustrativa y no documenta el acontecimiento ficticio. Detalle
+  en [13 Imágenes del dataset demo](13-imagenes-demo.md).
 
 ## Uso declarado de IA
 

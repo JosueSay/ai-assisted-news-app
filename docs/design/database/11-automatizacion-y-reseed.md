@@ -185,7 +185,7 @@ versionadas.
 ## Comandos
 
 ```bash
-make db-test            # suite offline, sin Atlas (204 tests)
+make db-test            # suite offline, sin Atlas (249 tests)
 make db-bootstrap       # init + seeds + checks, idempotente, sin confirmación
 make db-verify          # solo lectura: schema + catálogos + demo news
 make db-reseed-dry-run  # plan real sin escribir
