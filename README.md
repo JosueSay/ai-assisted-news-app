@@ -1,5 +1,8 @@
 # ai-assisted-news-app
 
+
+[Proyecto publicado](https://adfasdfasfd-1899a.web.app/) 
+
 ## Ejecutar noticias en desarrollo
 
 Para una configuración local nueva (los comandos `env-*` reemplazan el `.env` raíz):
